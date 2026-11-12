@@ -1,4 +1,4 @@
-import type { Config, Deco, Ratio, Res } from '../config';
+import type { Config, Deco, DecoMotion, Effect, Ratio, Res, WriteStyle } from '../config';
 
 type Patch = (patch: Partial<Config>) => void;
 
@@ -21,6 +21,10 @@ export function mountPanel(initial: Config, onChange: Patch) {
   const scaleAVal = el<HTMLElement>('scaleAVal');
   const scaleBVal = el<HTMLElement>('scaleBVal');
   const deco = el<HTMLSelectElement>('deco');
+  const decoMotion = el<HTMLSelectElement>('decoMotion');
+  const style = el<HTMLSelectElement>('style');
+  const effectsBox = el<HTMLElement>('effects');
+  const effectInputs = Array.from(effectsBox.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'));
   const decoScale = el<HTMLInputElement>('decoScale');
   const decoScaleVal = el<HTMLElement>('decoScaleVal');
   const duration = el<HTMLInputElement>('duration');
@@ -40,6 +44,11 @@ export function mountPanel(initial: Config, onChange: Patch) {
     scaleAVal.textContent = `${cfg.scaleA.toFixed(2)}×`;
     scaleBVal.textContent = `${cfg.scaleB.toFixed(2)}×`;
     deco.value = cfg.deco;
+    decoMotion.value = cfg.decoMotion;
+    style.value = cfg.style;
+    for (const input of effectInputs) {
+      input.checked = cfg.effects.includes(input.value as Effect);
+    }
     decoScale.value = String(cfg.decoScale);
     decoScaleVal.textContent = `${cfg.decoScale.toFixed(2)}×`;
     duration.value = String(cfg.duration);
@@ -79,6 +88,11 @@ export function mountPanel(initial: Config, onChange: Patch) {
     onChange({ duration: v });
   });
   deco.addEventListener('change', () => onChange({ deco: deco.value as Deco }));
+  decoMotion.addEventListener('change', () => onChange({ decoMotion: decoMotion.value as DecoMotion }));
+  style.addEventListener('change', () => onChange({ style: style.value as WriteStyle }));
+  effectsBox.addEventListener('change', () => {
+    onChange({ effects: effectInputs.filter((i) => i.checked).map((i) => i.value as Effect) });
+  });
 
   const segHandler = (root: HTMLElement, key: 'ratio' | 'res') => {
     root.addEventListener('click', (event) => {

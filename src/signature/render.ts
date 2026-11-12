@@ -1,38 +1,97 @@
 import { STAGE_BG } from '../config';
+import type { WriteStyle } from '../config';
 import type { Art, PlacedGlyph, PlacedStroke } from './layout';
-import { strokeProgress } from './layout';
-import { drawDeco, drawSparks, makeSparks, SPARK_START } from './effects';
+import { strokeProgress, WRITE_END, WRITE_START } from './layout';
+import {
+  dotsForStroke,
+  drawDeco,
+  drawRipple,
+  drawSeal,
+  drawSparks,
+  drawTrail,
+  makeSparks,
+  SPARK_START,
+} from './effects';
 import type { Spark } from './effects';
 
 export type Quality = 'lo' | 'hi';
 
 const FONT_FAMILY = '"Caveat", "Segoe Script", "Ink Free", "Bradley Hand", cursive';
 
+/** 字形风格的三组参数：倾斜（正=右倾）、描边加粗（1024 em 单位）、是否有连笔 */
+interface StyleParams {
+  lean: number;
+  bold: number;
+  ligature: boolean;
+}
+
+const STYLE_PARAMS: Record<WriteStyle, StyleParams> = {
+  ink: { lean: 0.02, bold: 12, ligature: false },
+  brush: { lean: 0.06, bold: 21, ligature: false },
+  signature: { lean: 0.16, bold: 17, ligature: true },
+  round: { lean: 0.03, bold: 25, ligature: false },
+};
+
 /**
  * 画一个字的“肉”：拉丁字符用 fillText，汉字用笔画矢量轮廓直接填充。
  * 汉字那条路不吃字体，笔形完全由数据决定，所以在任何机器上都长一样。
  */
-function drawGlyphInk(ctx: CanvasRenderingContext2D, g: PlacedGlyph) {
+function drawGlyphInk(ctx: CanvasRenderingContext2D, g: PlacedGlyph, style: WriteStyle = 'ink') {
   const gp = g.glyph;
+  const sp = STYLE_PARAMS[style];
+  ctx.save();
+  // 倾斜作用在屏幕坐标里：基线上不动、字头往右倒，像快速连笔的手写
+  ctx.translate(g.x, g.y);
+  if (sp.lean) ctx.transform(1, 0, -sp.lean, 1, 0, 0);
+
   if (!gp.paths) {
-    ctx.fillText(g.ch, g.x, g.y);
+    ctx.fillText(g.ch, 0, 0);
+    if (sp.bold > 12) {
+      // 拉丁也用同色描边把笔画压粗一档，粗细口径与汉字一致
+      ctx.lineWidth = ((sp.bold - 12) / 1024) * g.size;
+      ctx.lineJoin = 'round';
+      ctx.strokeText(g.ch, 0, 0);
+    }
+    ctx.restore();
     return;
   }
+
   const scale = g.size / 1024;
-  ctx.save();
   // 笔画数据的 y 轴向上（基线 y=0），屏幕 y 向下，所以这里把 y 翻过来
-  ctx.translate(g.x, g.y);
   ctx.scale(scale, -scale);
-  // 宋体级笔画在签名里偏瘦，按 1.2% em 描一圈同色边把墨迹加粗一档（笔形不变，只是长肉）
-  const bold = ctx.lineWidth;
-  ctx.lineWidth = 12;
+  ctx.lineWidth = sp.bold;
   ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
   for (const p of gp.paths) {
     ctx.fill(p);
     ctx.stroke(p);
   }
-  ctx.lineWidth = bold;
+  if (sp.ligature) drawLigatures(ctx, g);
   ctx.restore();
+}
+
+/** 连笔：把上一笔的收笔处轻轻接到下一笔的起笔处，签名才有“一笔写下来”的味道 */
+function drawLigatures(ctx: CanvasRenderingContext2D, g: PlacedGlyph) {
+  const strokes = g.glyph.strokes;
+  if (strokes.length < 2) return;
+  ctx.globalAlpha = 0.55;
+  ctx.lineWidth = 8;
+  for (let i = 1; i < strokes.length; i++) {
+    const a = strokes[i - 1].pts[strokes[i - 1].pts.length - 1];
+    const b = strokes[i].pts[0];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = Math.hypot(dx, dy);
+    // 只连挨得近的两笔，否则会甩出一条跑到字外的假笔画
+    if (len > 18 || len < 3) continue;
+    const cx = (a.x + b.x) / 2 + Math.max(-6, Math.min(6, dy * 0.18));
+    const cy = (a.y + b.y) / 2 - len * 0.16;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.quadraticCurveTo(cx, cy, b.x, b.y);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
 }
 
 /** 泛光开始收尾的比例：写字期间不亮，写完才“晕开” */
@@ -57,6 +116,8 @@ export class Scene {
   private art: Art | null = null;
   private sparks: Spark[] = [];
   private maskImg: ImageData | null = null;
+  /** 印章里那个“字”的预渲染图，避免每帧重画轮廓 */
+  private sealGlyph: HTMLCanvasElement | null = null;
   private W = 0;
   private H = 0;
 
@@ -74,7 +135,24 @@ export class Scene {
       this.bake(art, quality);
       this.baseKey = key;
       this.sparks = makeSparks(art);
+      this.sealGlyph = this.bakeSealGlyph(art);
     }
+  }
+
+  /** 印章里的首字：单独烤一张小图，颜色走第二色 */
+  private bakeSealGlyph(art: Art): HTMLCanvasElement | null {
+    const g = art.glyphs[0];
+    if (!g) return null;
+    const side = 256;
+    const c = makeCanvas(side, side);
+    const cx = c.getContext('2d')!;
+    const temp: PlacedGlyph = { ...g, x: side / 2 - side * 0.34, y: side * 0.86, size: side * 0.62, color: art.deco?.color ?? g.color };
+    cx.textBaseline = 'alphabetic';
+    cx.font = `${temp.size}px ${FONT_FAMILY}`;
+    cx.fillStyle = temp.color;
+    cx.strokeStyle = temp.color;
+    drawGlyphInk(cx, temp, art.style);
+    return c;
   }
 
   /** 底图：清晰墨迹一层；泛光另存一层（1/4 分辨率两次模糊，放大回来） */
@@ -86,7 +164,7 @@ export class Scene {
       ictx.font = `${g.size}px ${FONT_FAMILY}`;
       ictx.fillStyle = g.color;
       ictx.strokeStyle = g.color;
-      drawGlyphInk(ictx, g);
+      drawGlyphInk(ictx, g, art.style);
     }
     this.base = ink;
 
@@ -104,7 +182,7 @@ export class Scene {
       sctx.font = `${g.size}px ${FONT_FAMILY}`;
       sctx.fillStyle = g.color;
       sctx.strokeStyle = g.color;
-      drawGlyphInk(sctx, g);
+      drawGlyphInk(sctx, g, art.style);
     }
     sctx.setTransform(1, 0, 0, 1, 0, 0);
 
@@ -134,29 +212,94 @@ export class Scene {
     this.drawInk(t, opts);
     ctx.drawImage(this.layer!, 0, 0);
 
-    // 收尾泛光：写完才慢慢晕开，不靠每帧 shadowBlur
+    // 收尾泛光：写完才慢慢晕开，不靠每帧 shadowBlur；勾了呼吸效果就随时间脉动
     if (this.glow && t > BLOOM_START) {
       const a = Math.min(1, (t - BLOOM_START) / (1 - BLOOM_START));
-      ctx.globalAlpha = a * a;
+      const pulse = art.effects.includes('pulse')
+        ? 0.78 + 0.22 * Math.sin((t - BLOOM_START) * Math.PI * 3.2)
+        : 1;
+      ctx.globalAlpha = a * a * pulse;
       ctx.globalCompositeOperation = 'lighter';
       ctx.drawImage(this.glow, 0, 0);
       ctx.globalAlpha = 1;
       ctx.globalCompositeOperation = 'source-over';
     }
 
-    // 装饰：收尾弹出
-    if (art.deco) {
+    if (opts.quality === 'hi' && art.effects.includes('ripple')) {
       const d = art.deco;
-      const local = (t - d.at) / 0.06;
+      drawRipple(
+        ctx,
+        art.box.x + art.box.w / 2,
+        art.box.y + art.box.h * 0.55,
+        art.box.w * 0.55,
+        d ? d.color : '#FFFFFF',
+        t,
+        WRITE_END,
+        art.glyphs[art.glyphs.length - 1].color,
+      );
+    }
+
+    if (art.deco) this.drawDecoration(ctx, art, t, opts);
+
+    if (opts.quality === 'hi' && art.effects.includes('seal')) {
+      const at = 0.88;
+      const local = (t - at) / 0.07;
       if (local > 0) {
         const kk = Math.min(1, local);
-        drawDeco(ctx, d.kind, d.x, d.y, d.r, d.color, Math.min(1, kk * 2), easeOutBack(kk));
+        const size = Math.min(art.H, art.W) * 0.1;
+        // 印章落在名字右下角外侧，不压字；出界时自动往里收
+        const cx = Math.min(art.W - size * 0.6, art.box.x + art.box.w + size * 0.42);
+        const cy = Math.min(art.H - size * 0.5, art.box.y + art.box.h + size * 0.1);
+        drawSeal(
+          ctx,
+          cx,
+          cy,
+          size,
+          art.glyphs[art.glyphs.length - 1].color,
+          Math.min(1, kk * 1.6),
+          this.sealGlyph,
+        );
       }
     }
 
     if (opts.quality === 'hi') {
       drawSparks(ctx, this.sparks, t, SPARK_START);
     }
+  }
+
+  /** 装饰的入场：弹出 / 跟着笔尖跑 / 入场后悬浮漂移 */
+  private drawDecoration(ctx: CanvasRenderingContext2D, art: Art, t: number, opts: RenderOpts) {
+    const d = art.deco!;
+    const r = d.r;
+
+    if (art.decoMotion === 'follow') {
+      const tip = opts.quality === 'hi' ? activeTip(art, t) : null;
+      const write = Math.min(1, Math.max(0, (t - WRITE_START) / (WRITE_END - WRITE_START)));
+      if (tip && write < 1) {
+        // 写字时缩到笔尖旁边跟着走，写得越多越往锚点靠
+        const ease = write * write;
+        const x = tip.x * (1 - ease) + d.x * ease + r * 0.7;
+        const y = tip.y * (1 - ease) + d.y * ease - r * 0.5;
+        drawDeco(ctx, d.kind, x, y, r, d.color, 0.9, 0.62 + 0.38 * ease, Math.sin(t * Math.PI * 6) * 0.16);
+      } else if (t > d.at) {
+        const kk = Math.min(1, (t - d.at) / 0.06);
+        drawDeco(ctx, d.kind, d.x, d.y, r, d.color, Math.min(1, kk * 2), easeOutBack(kk));
+      }
+      return;
+    }
+
+    if (t <= d.at) return;
+    const local = (t - d.at) / 0.06;
+    const kk = Math.min(1, local);
+    if (art.decoMotion === 'drift') {
+      // 入场后一直轻轻上下浮 + 小幅摆动，整段时间都有动作
+      const ph = (t - d.at) * Math.PI * 2.4;
+      const y = d.y + Math.sin(ph) * r * 0.22;
+      const rot = Math.sin(ph * 0.5) * 0.16;
+      drawDeco(ctx, d.kind, d.x, y, r, d.color, Math.min(1, kk * 2), easeOutBack(kk), rot);
+      return;
+    }
+    drawDeco(ctx, d.kind, d.x, d.y, r, d.color, Math.min(1, kk * 2), easeOutBack(kk));
   }
 
   /** 每帧：按登场时间图生成遮罩，再以 destination-in 把墨迹“刷”出来 */
@@ -209,8 +352,58 @@ export class Scene {
         lctx.fill();
         lctx.globalCompositeOperation = 'source-over';
       }
+
+      if (art.effects.includes('trail')) {
+        const tail = strokeTail(art, t);
+        if (tail) drawTrail(lctx, tail.pts, tail.color, 1);
+      }
+      if (art.effects.includes('splash')) drawSplash(lctx, art, t);
     }
   }
+}
+
+/** 沿当前笔画往回取一段（最多 14 个点），给拖尾用 */
+function strokeTail(art: Art, t: number): { pts: Array<{ x: number; y: number; w: number }>; color: string } | null {
+  for (const s of art.strokes) {
+    if (t < s.d || t > s.d + s.a) continue;
+    const p = strokeProgress(s, t);
+    if (p <= 0 || p >= 1) continue;
+    const n = s.pts.length;
+    const upto = Math.max(2, Math.round((n - 1) * p) + 1);
+    const from = Math.max(0, upto - 14);
+    return { pts: s.pts.slice(from, upto), color: s.color };
+  }
+  return null;
+}
+
+/** 墨点飞溅：笔画推进到某个位置时，从笔尖甩出几颗小墨点，飞出去再淡掉 */
+function drawSplash(ctx: CanvasRenderingContext2D, art: Art, t: number) {
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  art.strokes.forEach((s, si) => {
+    const age = t - s.d;
+    if (age <= 0 || t > s.d + s.a + 0.12) return;
+    const p = strokeProgress(s, t);
+    const dots = dotsForStroke(si);
+    for (const dot of dots) {
+      if (p < dot.at) continue;
+      const since = (t - s.d) / Math.max(0.001, s.a);
+      const k = Math.min(1, (since - dot.at * 0.9) / 0.2);
+      if (k >= 1 || k < 0) continue;
+      const base = s.pts[Math.min(s.pts.length - 1, Math.round((s.pts.length - 1) * dot.at))];
+      const dir = Math.atan2(1, 0) + dot.angle;
+      const dist = dot.dist * (1 - Math.pow(1 - k, 2));
+      const x = base.x + Math.cos(dir) * dist;
+      const y = base.y + Math.sin(dir) * dist + dist * 0.35;
+      const r = Math.max(0.8, dot.r * (1 - k * 0.5));
+      ctx.globalAlpha = (1 - k) * 0.5;
+      ctx.fillStyle = s.color;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  });
+  ctx.restore();
 }
 
 /** 当前正在推进的那一笔，返回笔尖位置；没有就返回 null */

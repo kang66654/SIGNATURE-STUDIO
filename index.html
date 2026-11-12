@@ -91,12 +91,28 @@
                 <span>装饰</span>
                 <select id="deco">
                   <option value="sun">太阳</option>
+                  <option value="moon">月亮</option>
+                  <option value="star">星星</option>
+                  <option value="sparkle">闪光</option>
+                  <option value="heart">爱心</option>
                   <option value="cat">猫耳</option>
                   <option value="dog">小狗</option>
                   <option value="cloud">云朵</option>
-                  <option value="star">星星</option>
-                  <option value="heart">爱心</option>
+                  <option value="bolt">闪电</option>
+                  <option value="flame">火焰</option>
+                  <option value="crown">皇冠</option>
+                  <option value="note">音符</option>
+                  <option value="leaf">叶子</option>
+                  <option value="planet">星球</option>
                   <option value="none">无</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>装饰动作</span>
+                <select id="decoMotion">
+                  <option value="pop">收尾弹出</option>
+                  <option value="follow">跟随笔尖</option>
+                  <option value="drift">悬浮漂移</option>
                 </select>
               </label>
               <label class="field slider">
@@ -112,7 +128,30 @@
             </fieldset>
 
             <fieldset class="group">
-              <legend class="mono">05 / 输出</legend>
+              <legend class="mono">05 / 字形与效果</legend>
+              <label class="field">
+                <span>笔迹风格</span>
+                <select id="style">
+                  <option value="ink">细笔 · 清瘦</option>
+                  <option value="brush">毛笔 · 出锋</option>
+                  <option value="signature">连笔签名 · 右倾</option>
+                  <option value="round">圆润 · 粗笔</option>
+                </select>
+              </label>
+              <div class="field">
+                <span>动态效果 <i>可多选</i></span>
+                <div class="checks" id="effects">
+                  <label class="check"><input type="checkbox" value="trail" /><span>笔尖拖尾</span></label>
+                  <label class="check"><input type="checkbox" value="splash" /><span>墨点飞溅</span></label>
+                  <label class="check"><input type="checkbox" value="pulse" /><span>呼吸辉光</span></label>
+                  <label class="check"><input type="checkbox" value="ripple" /><span>写完涟漪</span></label>
+                  <label class="check"><input type="checkbox" value="seal" /><span>落款印章</span></label>
+                </div>
+              </div>
+            </fieldset>
+
+            <fieldset class="group">
+              <legend class="mono">06 / 输出</legend>
               <div class="field">
                 <span>画幅</span>
                 <div class="seg" id="ratio">

@@ -481,6 +481,47 @@ body {
   background: #fff;
 }
 
+/* 效果多选：两列，整行都是热区（≥44px），点文字也能勾 */
+.checks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 8px;
+  min-width: 0;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 2px;
+  font-size: 13px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.check input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  flex: none;
+  accent-color: var(--ink);
+  cursor: pointer;
+}
+
+.check span {
+  min-width: 0;
+}
+
+/* 五个选项两列排到最后一行不能只剩一个孤零零的格子 */
+.checks .check:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
+.check:has(input:checked) span {
+  color: var(--ink);
+}
+
 .seg button {
   min-height: 44px;
   border: 0;

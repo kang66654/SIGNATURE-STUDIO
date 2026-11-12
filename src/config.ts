@@ -1,6 +1,27 @@
-export type Deco = 'sun' | 'cat' | 'dog' | 'cloud' | 'star' | 'heart' | 'none';
+export type Deco =
+  | 'sun'
+  | 'moon'
+  | 'star'
+  | 'sparkle'
+  | 'heart'
+  | 'cat'
+  | 'dog'
+  | 'cloud'
+  | 'bolt'
+  | 'flame'
+  | 'crown'
+  | 'note'
+  | 'leaf'
+  | 'planet'
+  | 'none';
 export type Ratio = '16:9' | '9:16' | '1:1';
 export type Res = '1080' | '720';
+/** 字形风格：直接作用在墨迹层，决定“像哪种笔写的” */
+export type WriteStyle = 'ink' | 'brush' | 'signature' | 'round';
+/** 装饰的入场方式：静止弹出 / 跟着笔尖走 / 悬浮漂移 */
+export type DecoMotion = 'pop' | 'follow' | 'drift';
+/** 随时间轴运动的效果层，可多选 */
+export type Effect = 'trail' | 'splash' | 'pulse' | 'seal' | 'ripple';
 
 export interface Config {
   nameA: string;
@@ -11,6 +32,9 @@ export interface Config {
   scaleB: number;
   deco: Deco;
   decoScale: number;
+  decoMotion: DecoMotion;
+  style: WriteStyle;
+  effects: Effect[];
   duration: number;
   ratio: Ratio;
   res: Res;
@@ -25,6 +49,9 @@ export const DEFAULT_CONFIG: Config = {
   scaleB: 1.6,
   deco: 'sun',
   decoScale: 0.7,
+  decoMotion: 'pop',
+  style: 'brush',
+  effects: ['trail', 'pulse'],
   duration: 5,
   ratio: '16:9',
   res: '1080',
@@ -40,8 +67,14 @@ export function stageSize(cfg: Config): { W: number; H: number } {
   return { W: base, H: base };
 }
 
-const DECOS: Deco[] = ['sun', 'cat', 'dog', 'cloud', 'star', 'heart', 'none'];
+const DECOS: Deco[] = [
+  'sun', 'moon', 'star', 'sparkle', 'heart', 'cat', 'dog', 'cloud',
+  'bolt', 'flame', 'crown', 'note', 'leaf', 'planet', 'none',
+];
 const RATIOS: Ratio[] = ['16:9', '9:16', '1:1'];
+const STYLES: WriteStyle[] = ['ink', 'brush', 'signature', 'round'];
+const MOTIONS: DecoMotion[] = ['pop', 'follow', 'drift'];
+const EFFECTS: Effect[] = ['trail', 'splash', 'pulse', 'seal', 'ripple'];
 
 export function encodeHash(cfg: Config): string {
   const p = new URLSearchParams();
@@ -53,6 +86,9 @@ export function encodeHash(cfg: Config): string {
   p.set('sb', cfg.scaleB.toFixed(2));
   p.set('d', cfg.deco);
   p.set('ds', cfg.decoScale.toFixed(2));
+  p.set('dm', cfg.decoMotion);
+  p.set('w', cfg.style);
+  p.set('fx', cfg.effects.join(','));
   p.set('t', String(cfg.duration));
   p.set('r', cfg.ratio);
   p.set('q', cfg.res);
@@ -75,6 +111,12 @@ export function decodeHash(hash: string): Config {
   };
   const deco = (p.get('d') ?? '') as Deco;
   const ratio = (p.get('r') ?? '') as Ratio;
+  const style = (p.get('w') ?? '') as WriteStyle;
+  const motion = (p.get('dm') ?? '') as DecoMotion;
+  const fxRaw = p.get('fx');
+  const effects = fxRaw === null
+    ? DEFAULT_CONFIG.effects
+    : (fxRaw.split(',').map((s) => s.trim()).filter((s) => EFFECTS.includes(s as Effect)) as Effect[]);
   return {
     nameA: (p.get('a') ?? DEFAULT_CONFIG.nameA).slice(0, 12),
     nameB: (p.get('b') ?? DEFAULT_CONFIG.nameB).slice(0, 12),
@@ -84,6 +126,9 @@ export function decodeHash(hash: string): Config {
     scaleB: clamp(num('sb', DEFAULT_CONFIG.scaleB), 0.8, 2.2),
     deco: DECOS.includes(deco) ? deco : DEFAULT_CONFIG.deco,
     decoScale: clamp(num('ds', DEFAULT_CONFIG.decoScale), 0.4, 1.2),
+    decoMotion: MOTIONS.includes(motion) ? motion : DEFAULT_CONFIG.decoMotion,
+    style: STYLES.includes(style) ? style : DEFAULT_CONFIG.style,
+    effects: [...new Set(effects)],
     duration: clamp(Math.round(num('t', DEFAULT_CONFIG.duration)), 3, 10),
     ratio: RATIOS.includes(ratio) ? ratio : DEFAULT_CONFIG.ratio,
     res: p.get('q') === '720' ? '720' : '1080',

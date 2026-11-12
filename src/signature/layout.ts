@@ -2,7 +2,7 @@ import type { Config } from '../config';
 import { stageSize } from '../config';
 import { getGlyph, NOMINAL_PX } from './skeleton';
 import type { Glyph, StrokePoint } from './skeleton';
-import type { Deco } from '../config';
+import type { Deco, DecoMotion, Effect, WriteStyle } from '../config';
 
 export interface PlacedStroke {
   pts: StrokePoint[];
@@ -55,6 +55,10 @@ export interface Art {
   map: Uint8Array;
   mapW: number;
   mapH: number;
+  /** 字形风格与图层开关，跟着 Art 一起走，导出与预览共用 */
+  style: WriteStyle;
+  decoMotion: DecoMotion;
+  effects: Effect[];
 }
 
 interface Block {
@@ -63,8 +67,8 @@ interface Block {
   scale: number;
 }
 
-const WRITE_START = 0.05;
-const WRITE_END = 0.8;
+export const WRITE_START = 0.05;
+export const WRITE_END = 0.8;
 
 export function buildArt(cfg: Config): Art {
   const { W, H } = stageSize(cfg);
@@ -78,6 +82,8 @@ export function buildArt(cfg: Config): Art {
   const shortSide = Math.min(W, H);
   const single = blocks.length === 1;
   const maxW = single ? W * 0.74 : W * 0.42;
+  // 连笔签名整体收紧字距，笔画挨得近才连得上
+  const track = cfg.style === 'signature' ? 0.92 : 1;
 
   for (let bi = 0; bi < blocks.length; bi++) {
     const b = blocks[bi];
@@ -94,7 +100,7 @@ export function buildArt(cfg: Config): Art {
       continue;
     }
     let size = shortSide * 0.2 * b.scale;
-    const naturalW = glyphs.reduce((s, g) => s + g.adv * (size / NOMINAL_PX), 0);
+    const naturalW = glyphs.reduce((s, g) => s + g.adv * track * (size / NOMINAL_PX), 0);
     if (naturalW > maxW) size *= maxW / naturalW;
     // 字少时（比如单个汉字、两三个字母）名字会缩在画面中间，放大一档让它撑住版面
     else if (naturalW < maxW * 0.8) size *= Math.min(1.7, (maxW * 0.86) / naturalW);
@@ -106,7 +112,7 @@ export function buildArt(cfg: Config): Art {
 
   // 横向排布：单名居中；双名左右分列、基线错开，看起来像两个人各写各的
   const blockWidths = placed.map((gs) =>
-    gs.reduce((s, it) => s + it.glyph.adv * (it.size / NOMINAL_PX), 0),
+    gs.reduce((s, it) => s + it.glyph.adv * track * (it.size / NOMINAL_PX), 0),
   );
   const gap = single ? 0 : W * 0.05;
   const totalW = blockWidths.reduce((a, b) => a + b, 0) + gap * (blocks.length - 1);
@@ -147,7 +153,7 @@ export function buildArt(cfg: Config): Art {
           block: bi,
         });
       }
-      cursorX += g.adv * s;
+      cursorX += g.adv * s * track;
     }
     cursorX += gap;
   }
@@ -173,7 +179,7 @@ export function buildArt(cfg: Config): Art {
     }
     const g = anchor.glyph;
     const s = anchor.size / NOMINAL_PX;
-    const r = shortSide * 0.055 * cfg.decoScale;
+    const r = shortSide * 0.07 * cfg.decoScale;
     // 贴着最后一个字：横向落在字身中线偏右，纵向压在字顶上方（留出一个半径的呼吸，别压住字头）
     const x = anchor.x + (g.adv * s) * 0.62;
     const y = Math.max(r * 1.6, anchor.y - g.asc * s - r * 1.25);
@@ -190,13 +196,19 @@ export function buildArt(cfg: Config): Art {
   const box = boundsOf(glyphs);
   const key = [
     W, H, cfg.nameA, cfg.nameB, cfg.colorA, cfg.colorB, cfg.scaleA, cfg.scaleB, cfg.deco, cfg.decoScale,
+    cfg.style,
   ].join('|');
 
   const mapW = Math.ceil(W / 2);
   const mapH = Math.ceil(H / 2);
   const map = buildTimeMap(glyphs, strokes, mapW, mapH);
 
-  return { W, H, glyphs, strokes, deco, missing, key, box, map, mapW, mapH };
+  return {
+    W, H, glyphs, strokes, deco, missing, key, box, map, mapW, mapH,
+    style: cfg.style,
+    decoMotion: cfg.decoMotion,
+    effects: cfg.effects,
+  };
 }
 
 /** 把每个字的“登场时间”投影到整张画布的半分辨率字节图上 */
