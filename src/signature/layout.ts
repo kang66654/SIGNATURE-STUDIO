@@ -96,6 +96,8 @@ export function buildArt(cfg: Config): Art {
     let size = shortSide * 0.2 * b.scale;
     const naturalW = glyphs.reduce((s, g) => s + g.adv * (size / NOMINAL_PX), 0);
     if (naturalW > maxW) size *= maxW / naturalW;
+    // 字少时（比如单个汉字、两三个字母）名字会缩在画面中间，放大一档让它撑住版面
+    else if (naturalW < maxW * 0.8) size *= Math.min(1.7, (maxW * 0.86) / naturalW);
     placed.push(glyphs.map((g) => ({ glyph: g, size, block: bi, color: b.color })));
   }
 
@@ -171,11 +173,15 @@ export function buildArt(cfg: Config): Art {
     }
     const g = anchor.glyph;
     const s = anchor.size / NOMINAL_PX;
+    const r = shortSide * 0.055 * cfg.decoScale;
+    // 贴着最后一个字：横向落在字身中线偏右，纵向压在字顶上方一点，别飘到画布边缘
+    const x = anchor.x + (g.adv * s) * 0.62;
+    const y = Math.max(r * 1.6, anchor.y - g.asc * s - r * 0.55);
     deco = {
       kind: cfg.deco,
-      x: anchor.x + g.adv * s * 0.55,
-      y: anchor.y - g.asc * s * 1.42,
-      r: shortSide * 0.055 * cfg.decoScale,
+      x,
+      y,
+      r,
       color: anchor.color,
       at: WRITE_END + 0.03,
     };

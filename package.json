@@ -7,6 +7,7 @@
     "dev": "node scripts/dev.mjs",
     "build": "node scripts/build.mjs",
     "build:single": "node scripts/build.mjs --single",
+    "gen:hanzi": "node scripts/build-hanzi.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

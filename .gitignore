@@ -8,6 +8,10 @@ dist/
 .build/
 .tmp/
 
+# 笔画源数据（32MB，可由 README 里的 npm pack + tar 重新解出）
+.vendor/
+*.tgz
+
 # 日志
 *.log
 

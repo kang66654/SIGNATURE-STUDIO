@@ -52,7 +52,9 @@ function updateSpecs() {
 function updateMissing() {
   if (art.missing.length) {
     const list = [...new Set(art.missing)].join(' ');
-    panel.setMissing(`当前手写体不含这些字符：${list}。拉丁字母、数字与常见标点可用；中文需要额外的笔画数据。`);
+    panel.setMissing(
+      `这些字符没有字形：${list}。可用范围＝拉丁字母、数字、常见标点，加 GB2312 一级字表的 3755 个汉字；其余生僻字、日文假名、emoji 暂不支持。`,
+    );
   } else {
     panel.setMissing(null);
   }
@@ -296,6 +298,15 @@ async function boot() {
   } else {
     play();
   }
+
+  // 同页改 hash（粘贴分享链接、浏览器前进后退）也要真的换配置，不然链接看着生效其实没换
+  window.addEventListener('hashchange', () => {
+    cfg = location.hash.length > 1 ? decodeHash(location.hash) : DEFAULT_CONFIG;
+    panel.sync(cfg);
+    cancelAnimationFrame(raf);
+    playing = false;
+    applyArt('hi');
+  });
 }
 
 void boot();

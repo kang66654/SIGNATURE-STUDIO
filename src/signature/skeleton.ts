@@ -3,7 +3,10 @@
  *
  * 运行时只做一次（按字符缓存，可选 IndexedDB 持久化），之后每次重建只读坐标。
  * 管线：栅格化 → 二值化 → Zhang–Suen 细化 → 折线跟踪 → RDP 简化 → 距离变换回填笔宽 → 排序。
+ * 汉字走另一条路（buildHanziGlyph）：墨迹直接取笔画轮廓，骨架直接取中线，笔顺是数据里写死的。
  */
+
+import { HANZI_BASELINE, HANZI_EM, hanziShape, hasHanzi } from './hanzi';
 
 export interface StrokePoint {
   x: number;
@@ -30,12 +33,16 @@ export interface Glyph {
    * 遮罩直接由它生成：墨迹的每一块都知道自己什么时候该出现，不靠“沿骨架刷一条线”。
    */
   reveal: { idx: Int16Array; frac: Uint8Array };
+  /**
+   * 汉字才有的矢量墨迹：每笔的轮廓（1024 坐标空间，y 向下，基线 900）。
+   * 有它就不用 fillText 画“肉”，直接填路径，笔形才不会被系统字体带跑。
+   */
+  paths?: Path2D[];
 }
 
 /** 骨架生成的基准字号：所有字形按这个尺寸算，排版时按比例缩放 */
 export const NOMINAL_PX = 200;
 const PAD = 6;
-
 const glyphCache = new Map<string, Glyph>();
 const missCache = new Set<string>();
 
@@ -130,7 +137,9 @@ export function getGlyph(ch: string): Glyph | null {
 
 function buildGlyph(ch: string): Glyph | null {
   if (!ch.trim()) return null;
-  // 只认手写体本身覆盖的字符；否则系统字体会顶上来，画出来是“印刷体”混在手写里。
+  // 汉字走另一条路：用真实笔画数据，不依赖手写体是否覆盖
+  if (hasHanzi(ch)) return buildHanziGlyph(ch);
+  // 其余只认手写体本身覆盖的字符；否则系统字体会顶上来，画出来是“印刷体”混在手写里。
   // 字体还没就绪时先跳过这项检查，等 document.fonts 完成后缓存会被清掉重算。
   if (document.fonts.status === 'loaded' && !hasHandwritingGlyph(ch)) return null;
   const ctx = getMeasureCtx();
@@ -208,6 +217,73 @@ function buildGlyph(ch: string): Glyph | null {
 
   return { ch, adv, asc: -top, strokes: ordered, raster: { w: W, h: H, base: baseline, pad: PAD }, reveal };
 }
+
+/**
+ * 汉字字形：墨迹取笔画轮廓（矢量填充，笔形 100% 听数据的），骨架取中线折线（顺序就是真笔顺）。
+ * 不用细化、不用缝合、不用猜笔顺 —— 数据本身已经把这三件事做完了。
+ */
+function buildHanziGlyph(ch: string): Glyph | null {
+  const shape = hanziShape(ch);
+  if (!shape || !shape.medians.length) return null;
+
+  const k = NOMINAL_PX / HANZI_EM;
+  const W = Math.ceil(NOMINAL_PX) + PAD * 2;
+  const baseline = Math.ceil(HANZI_BASELINE * k) + PAD;
+  const H = Math.ceil(baseline + (HANZI_EM - HANZI_BASELINE) * k) + PAD;
+
+  const paths = shape.paths.map((d) => new Path2D(d));
+
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const g2 = c.getContext('2d', { willReadFrequently: true })!;
+  g2.setTransform(k, 0, 0, k, PAD, baseline - HANZI_BASELINE * k);
+  g2.fillStyle = '#fff';
+  for (const p of paths) g2.fill(p);
+  g2.setTransform(1, 0, 0, 1, 0, 0);
+
+  const img = g2.getImageData(0, 0, W, H).data;
+  const bin = new Uint8Array(W * H);
+  for (let i = 0; i < W * H; i++) bin[i] = img[i * 4 + 3] > 40 ? 1 : 0;
+
+  const dist = distanceField(bin, W, H);
+
+  const strokes: Stroke[] = [];
+  for (const med of shape.medians) {
+    const pts: StrokePoint[] = med.map(([x, y]) => {
+      const px = Math.min(W - 1, Math.max(0, Math.round(x * k + PAD)));
+      const py = Math.min(H - 1, Math.max(0, Math.round((y - HANZI_BASELINE) * k + baseline)));
+      const d = dist[py * W + px] || 1;
+      return { x: x * k, y: (y - HANZI_BASELINE) * k, w: Math.max(1.6, d * 2) };
+    });
+    // 单点笔画（“点”）也要能占一段时间，补一个略偏移的点
+    if (pts.length === 1) pts.push({ x: pts[0].x + 1.4, y: pts[0].y + 0.4, w: pts[0].w });
+    let arc = 0;
+    for (let i = 1; i < pts.length; i++) {
+      arc += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+    }
+    strokes.push({ pts, arc });
+  }
+
+  for (const s of strokes) widen(s.pts);
+  for (const s of strokes) smooth(s.pts);
+
+  let top = 0;
+  for (const s of strokes) for (const p of s.pts) top = Math.min(top, p.y);
+
+  const reveal = buildReveal(strokes, bin, W, H, baseline);
+
+  return {
+    ch,
+    adv: NOMINAL_PX,
+    asc: -top,
+    strokes,
+    raster: { w: W, h: H, base: baseline, pad: PAD },
+    reveal,
+    paths,
+  };
+}
+
 
 /**
  * 把每一笔“贴”到它覆盖的墨迹上：先沿笔画铺种子（记录笔画序号 + 弧长百分比），

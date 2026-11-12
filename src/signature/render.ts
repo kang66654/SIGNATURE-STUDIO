@@ -1,5 +1,5 @@
 import { STAGE_BG } from '../config';
-import type { Art, PlacedStroke } from './layout';
+import type { Art, PlacedGlyph, PlacedStroke } from './layout';
 import { strokeProgress } from './layout';
 import { drawDeco, drawSparks, makeSparks, SPARK_START } from './effects';
 import type { Spark } from './effects';
@@ -7,6 +7,32 @@ import type { Spark } from './effects';
 export type Quality = 'lo' | 'hi';
 
 const FONT_FAMILY = '"Caveat", "Segoe Script", "Ink Free", "Bradley Hand", cursive';
+
+/**
+ * 画一个字的“肉”：拉丁字符用 fillText，汉字用笔画矢量轮廓直接填充。
+ * 汉字那条路不吃字体，笔形完全由数据决定，所以在任何机器上都长一样。
+ */
+function drawGlyphInk(ctx: CanvasRenderingContext2D, g: PlacedGlyph) {
+  const gp = g.glyph;
+  if (!gp.paths) {
+    ctx.fillText(g.ch, g.x, g.y);
+    return;
+  }
+  const scale = g.size / 1024;
+  ctx.save();
+  ctx.translate(g.x, g.y - 900 * scale);
+  ctx.scale(scale, scale);
+  // 宋体级笔画在签名里偏瘦，按 1.2% em 描一圈同色边把墨迹加粗一档（笔形不变，只是长肉）
+  const bold = ctx.lineWidth;
+  ctx.lineWidth = 12;
+  ctx.lineJoin = 'round';
+  for (const p of gp.paths) {
+    ctx.fill(p);
+    ctx.stroke(p);
+  }
+  ctx.lineWidth = bold;
+  ctx.restore();
+}
 
 /** 泛光开始收尾的比例：写字期间不亮，写完才“晕开” */
 const BLOOM_START = 0.74;
@@ -58,7 +84,8 @@ export class Scene {
     for (const g of art.glyphs) {
       ictx.font = `${g.size}px ${FONT_FAMILY}`;
       ictx.fillStyle = g.color;
-      ictx.fillText(g.ch, g.x, g.y);
+      ictx.strokeStyle = g.color;
+      drawGlyphInk(ictx, g);
     }
     this.base = ink;
 
@@ -71,11 +98,14 @@ export class Scene {
     const small = makeCanvas(Math.round(art.W / k), Math.round(art.H / k));
     const sctx = small.getContext('2d')!;
     sctx.textBaseline = 'alphabetic';
+    sctx.scale(1 / k, 1 / k);
     for (const g of art.glyphs) {
-      sctx.font = `${g.size / k}px ${FONT_FAMILY}`;
+      sctx.font = `${g.size}px ${FONT_FAMILY}`;
       sctx.fillStyle = g.color;
-      sctx.fillText(g.ch, g.x / k, g.y / k);
+      sctx.strokeStyle = g.color;
+      drawGlyphInk(sctx, g);
     }
+    sctx.setTransform(1, 0, 0, 1, 0, 0);
 
     const glow = makeCanvas(art.W, art.H);
     const gctx = glow.getContext('2d')!;
