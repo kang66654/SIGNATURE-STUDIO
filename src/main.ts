@@ -3,6 +3,7 @@ import type { Config } from './config';
 import { buildArt } from './signature/layout';
 import { Scene } from './signature/render';
 import { clearGlyphCache, warmGlyphFont } from './signature/skeleton';
+import { ensureCjkFont } from './signature/cjkfont';
 import { exportMp4, hasWebCodecs } from './export/mp4';
 import { exportWebm, pickWebmMime } from './export/webm';
 import { mountPanel } from './ui/panel';
@@ -290,6 +291,8 @@ async function boot() {
   } catch {
     toast('手写体加载失败，已回退到系统手写字体');
   }
+  // 中文字体晚到会掉到系统字体（画成印刷体），必须等它真的就绪再开始造字形
+  await ensureCjkFont(cfg.cjkFont);
   warmGlyphFont();
   clearGlyphCache();
   applyArt('hi');
@@ -305,8 +308,14 @@ async function boot() {
     panel.sync(cfg);
     cancelAnimationFrame(raf);
     playing = false;
-    applyArt('hi');
+    void reloadCjkFont(cfg.cjkFont).then(() => applyArt('hi'));
   });
+}
+
+/** 换中文字体：先把字体等到位，再清缓存重建，避免先用系统字体画一遍 */
+async function reloadCjkFont(key: Config['cjkFont']) {
+  await ensureCjkFont(key);
+  clearGlyphCache();
 }
 
 void boot();

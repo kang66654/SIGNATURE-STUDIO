@@ -48,6 +48,27 @@ node_modules\@rollup\rollup-win32-x64-msvc\rollup.win32-x64-msvc.node  →  ERR_
 4. 运行时 `src/signature/hanzi.ts` 首次用到某字才拆表、解码、缓存；`buildHanziGlyph` 把**笔画轮廓**填成墨迹（矢量，跟系统字体无关，任何机器一致），把 `medians` 当作骨架与笔顺（数组顺序就是真实笔顺，不需要细化/合段/猜顺序）。注意这套数据的 **y 轴是向上的**（基线 y≈0，字身往正方向长），而屏幕 y 向下，所以装配位图和渲染矢量时各翻一次 y，别直接把 y 当屏幕坐标用 —— 这是第一版"中文整个上下颠倒"的根因。
 5. 仍然复用同一套登场时间图与遮罩：沿中线铺种子做两轮 BFS，得到"每个墨迹像素属于第几笔、走到这一笔的百分之几"，逐帧揭开。
 6. 楷书笔画偏瘦，`drawGlyphInk` 在填完轮廓后按 1.2% em 同色描一圈边给墨迹"长肉"，笔形不变。
+7. **换中文字体**（程序员最关心的一条）：`buildHanziGlyph(ch, fontKey)` 有两种肉 —— `kai` 继续填 Arphic 矢量轮廓；`brush` / `cursive` 用内嵌手写体 `fillText` 位图当墨迹。**骨永远来自 `medians`**，所以换字体不改笔顺：把中线按字体墨迹的包围盒做等比缩放 + 中心对齐（`min(sx,sy)`，防止骨架跑到字形外的笔画永远揭示不出来），宽度仍由距离变换回填，再跑同一套两轮 BFS。字体里没这个字（`inkCount < 30`）自动退回 `kai`，不留白。
+
+### 中文字体（两种手写真字体 + 内置楷书）
+
+| 选项 | 字体族 | 来源 | 授权 | 体积（3755 字子集） |
+| --- | --- | --- | --- | --- |
+| `kai` 楷书 · 内置笔画 | 无（矢量轮廓 + 笔顺数据） | hanzi-writer-data / Arphic | Arphic Public License | 0（数据已含） |
+| `brush` 毛笔楷书 · 马善政 | `MSZ Brush` = Ma Shan Zheng | [@fontsource/ma-shan-zheng](https://fontsource.org/fonts/ma-shan-zheng) 5.3.1 | OFL-1.1 | 2.95MB |
+| `cursive` 行书 · 志莽 | `ZMX Cursive` = Zhi Mang Xing | [@fontsource/zhi-mang-xing](https://fontsource.org/fonts/zhi-mang-xing) 5.3.0 | OFL-1.1 | 2.06MB |
+
+**为什么不整份塞字体**：两款字体的全量 TTF 各 5–10MB，直接内联会把单文件推到 30MB。`scripts/build-cjk.py` 走的是"按本站支持的字裁剪"：读 `src/data/hanzi.ts` 的 `HANZI_CHARS`（3755 字）→ 拉 fontsource 的 `index.css` 解析每个分片的 `unicode-range` → 只下命中分片 → fontTools 合并 → 按字符集 subset → 输出**一个** woff2 到 `src/assets/cjk/{id}.woff2`，并生成同名 `.css`（一行 `@font-face`），由 `src/style.css` 里 `@import` 进来、esbuild 的 `.woff2 → dataurl` 内联进产物。
+
+```bash
+python scripts/build-cjk.py          # 重新生成 / 更新字体子集（需要 fontTools + brotli）
+python scripts/build-cjk.py brush    # 只重建其中一款
+npm run build:single
+```
+
+体积与收益的取舍：马善政（毛笔）2.95MB、志莽（行书）2.06MB，两款加起来把单文件从 5.0MB 推到 11.7MB。第三款（龙藏 LongCang）实测再 +2.5MB、观感与行书接近，为了不让文件继续膨胀**没有收进来**；想加回来把 `scripts/build-cjk.py` 的 `FONTS` 里那行取消注释、重新跑，再补 `src/signature/cjkfont.ts`、`src/config.ts` 的 `CJKFontKey`、`index.html` 的 `<option>` 与 `src/style.css` 的 `@import` 四处即可。
+
+字体晚到会被"系统字体顶替"画成印刷体，所以 `main.ts` 在 boot 和每次切字体时都先 `await ensureCjkFont(key)`（`document.fonts.load('96px "<family>"', '康誉…')`）再 `clearGlyphCache()` 重建；`Art.key` 与 glyph 缓存键都带上了字体，切字体不会命中旧缓存。
 
 **重新生成数据**（覆盖范围、编码格式要改都从这里改）：
 
@@ -75,7 +96,7 @@ npm run build:single
 
 ---
 
-## 参数（13 个）
+## 参数（14 个）
 
 | # | 参数 | 默认 | 范围 |
 | --- | --- | --- | --- |
@@ -87,13 +108,14 @@ npm run build:single
 | 6 | 字号倍率 B | 1.6 | 0.8–2.2 |
 | 7 | 装饰 | 太阳 | 15 项：太阳 / 月亮 / 星星 / 闪光 / 爱心 / 猫耳 / 小狗 / 云朵 / 闪电 / 火焰 / 皇冠 / 音符 / 叶子 / 星球 / 无 |
 | 8 | 装饰倍率 | 0.7 | 0.4–1.2 |
-| 9 | 装饰动作 | 收尾弹出 | 收尾弹出 / 跟随笔尖 / 悬浮漂移 |
-| 10 | 笔迹风格 | 毛笔 | 细笔 / 毛笔 / 连笔签名 / 圆润 |
-| 11 | 动态效果（可多选） | 笔尖拖尾 + 呼吸辉光 | 笔尖拖尾 / 墨点飞溅 / 呼吸辉光 / 写完涟漪 / 落款印章 |
-| 12 | 时长 | 5.0s | 3–10s |
-| 13 | 画幅 + 清晰度 | 16:9 · 1080 | 16:9 / 9:16 / 1:1 · 1080 / 720 |
+| 9 | 装饰动作 | 收尾弹出 | 8 档：收尾弹出 / 跟随笔尖 / 悬浮漂移 / 绕字旋转 / 落下弹跳 / 自旋入场 / 钟摆摇晃 / 呼吸缩放 |
+| 10 | 中文字体 | 楷书（内置） | 楷书 · 内置笔画 / 毛笔楷书 · 马善政 / 行书 · 志莽 |
+| 11 | 笔迹风格 | 毛笔 | 细笔 / 毛笔 / 连笔签名 / 圆润 |
+| 12 | 动态效果（可多选） | 笔尖拖尾 + 呼吸辉光 | 笔尖拖尾 / 墨点飞溅 / 呼吸辉光 / 写完涟漪 / 落款印章 |
+| 13 | 时长 | 5.0s | 3–10s |
+| 14 | 画幅 + 清晰度 | 16:9 · 1080 | 16:9 / 9:16 / 1:1 · 1080 / 720 |
 
-所有参数都写进 `location.hash`，链接即配置；「复制分享链接」把当前 hash 拼到地址栏并复制。hash 键：`a b ca cb sa sb d ds dm w fx t r q`（`dm`=装饰动作、`w`=笔迹风格、`fx`=效果逗号串；缺 `fx` 时回落到默认两个效果，非法值会被过滤）。
+所有参数都写进 `location.hash`，链接即配置；「复制分享链接」把当前 hash 拼到地址栏并复制。hash 键：`a b ca cb sa sb d ds dm w f fx t r q`（`dm`=装饰动作、`w`=笔迹风格、`f`=中文字体、`fx`=效果逗号串；缺 `fx` 时回落到默认两个效果，非法值会被过滤）。
 
 ---
 
@@ -110,11 +132,31 @@ npm run build:single
 
 倾斜做在**基线原点**上（`transform(1,0,-lean,1,0,0)`）：基线不动、字头往右倒，因此不影响排版与遮罩对齐。加粗是给矢量轮廓叠一层同色 `stroke`，汉字与拉丁共用同一口径（拉丁走 `strokeText`），粗细一致。
 
-装饰三种动作都在**时间轴**上演算，不是开头淡入结尾淡出：
+装饰八种动作都在**时间轴**上演算，不是开头淡入结尾淡出（全部只依赖 `t`，没有随机数与历史状态）：
 
-- `pop`：`t > WRITE_END + 0.03` 后 60ms 内 `easeOutBack` 弹出；
-- `follow`：写字期间（`0.05–0.8`）缩到 0.62× 贴在当前笔尖旁随笔画移动，随书写进度过渡到锚点并放大回 1×，末尾再弹一下 —— 真的跟着笔走；
-- `drift`：入场后在锚点上下浮动 ±0.22r、摆动 ±0.16rad，整段都保持轻微动作。
+| 动作 | 演算 | 视觉 |
+| --- | --- | --- |
+| `pop` 收尾弹出 | `t > d.at` 后 60ms `easeOutBack` 到 1× | 写完停一下，装饰"叮"地弹出并轻微过冲 |
+| `follow` 跟随笔尖 | 书写期（`0.05–0.8`）缩到 0.62× 贴笔尖随笔画移动，按书写进度 `write²` 过渡回锚点再弹一下 | 装饰真的跟着笔走 |
+| `drift` 悬浮漂移 | `y = d.y + sin(2.4π(t−at))·0.22r`，`rot = sin(1.2π(t−at))·0.16` | 入场后一直轻轻浮动 |
+| `orbit` 绕字旋转 | 取 `art.box` 中心，椭圆半径 `(b.w/2+1.35r, b.h/2+1.05r)`，角速度 0.55 圈/单位时间，装饰自身转角 `= 轨道相位 + 90°`；入场 60ms 内从锚点滑进轨道 | 绕整个名字公转，像行星/打光 |
+| `drop` 落下弹跳 | 先 `u²` 加速从 `3.2r` 高度落到锚点（0.34 时长），落地后 `|sin(3.2π·rest)|·0.32·3.2r·e^(−9rest)` 三次衰减弹跳，同时 -0.5rad 转正 | 从上方砸下来，弹两下停住 |
+| `spin` 自旋入场 | 0.28 内 `easeOutBack` 缩放 0→1，转角从 `−1.5π` 回正，之后 `sin(4πt)·0.12` 微自转 | 背对观众转过来 |
+| `swing` 钟摆摇晃 | 支点在锚点上方 `1.9r`，摆臂 1.9r，`θ = sin(2.7π·τ)·0.5·e^(−6τ)` | 挂起来摆，摆幅逐渐收小后停在正上方 |
+| `breathe` 呼吸缩放 | `scale = 1 + 0.1 sin(1.6πτ)`，alpha 在 0.78–1.0 同步起伏 | 一胀一缩，像呼吸/心跳 |
+
+**哪个装饰配哪个动作**（面板里选完就会给出这行提示，不一致时标红提示"建议换成…"）：
+
+| 装饰 | 推荐动作 | 理由 |
+| --- | --- | --- |
+| 太阳 / 星球 | `orbit` | 绕字公转最像恒星打光、行星轨道 |
+| 星星 / 闪光 | `spin` | 自旋 + 缩放，收尾才闪得出来 |
+| 皇冠 / 闪电 | `drop` | 从上方落下弹一下，像戴到字头上 / 砸下来 |
+| 火焰 / 音符 | `swing` | 左右晃：火被风吹、音符打拍子 |
+| 云朵 / 叶子 | `drift` | 本来就该慢慢飘 |
+| 月亮 / 爱心 | `breathe` | 呼吸式明暗起伏 / 心跳节奏 |
+| 猫耳 / 小狗 | `pop` | 贴在字头弹出后就停住，乱飞会怪 |
+| 任意 | `follow` | 想强调"边写边有东西跟着笔走"时用它 |
 
 五个效果层同样只依赖 `t`（无随机数、无历史状态、无时间戳），所以**同一 t 必出同一帧**，导出可复现：
 
@@ -139,7 +181,8 @@ index.html                    页面骨架
 src/main.ts                   挂载、事件、重建调度、播放、导出编排
 src/config.ts                 参数类型、默认值、stageSize()、hash 编解码
 src/style.css                 深浅两套纸面 + 舞台、控件、遮罩
-src/signature/skeleton.ts     栅格化 → 细化 → 距离场 → 追踪 → 合段 → 笔顺 → 登场时间归属；中文走 buildHanziGlyph
+src/signature/skeleton.ts     栅格化 → 细化 → 距离场 → 追踪 → 合段 → 笔顺 → 登场时间归属；中文走 buildHanziGlyph(ch, fontKey)
+src/signature/cjkfont.ts      中文字体表（kai / brush / cursive）与 ensureCjkFont() 就绪检测
 src/signature/hanzi.ts        中文笔画表解码（轮廓 Path2D + 中线点列）与缓存
 src/signature/layout.ts       排布、时间分配、登场时间图投影、装饰锚点
 src/signature/render.ts       draw(ctx, t, {quality})：墨迹 / 辉光 / 笔尖 / 装饰 / 星屑
@@ -149,11 +192,13 @@ src/export/webm.ts            MediaRecorder 回退（Safari / 无 WebCodecs）
 src/ui/panel.ts               五组原生控件双向绑定、缺字提示
 src/ui/toast.ts               单例提示
 src/assets/*.woff2            Caveat 400 / 700（OFL，本地内联）
+src/assets/cjk/               中文手写体子集：brush.woff2 + brush.css、cursive.woff2 + cursive.css（OFL）
 src/data/hanzi.ts             3755 个汉字笔画数据（生成物，勿手改）
 src/data/ARPHICPL.txt         中文字形数据的 Arphic Public License 原文
 scripts/build.mjs             esbuild 构建（默认多文件，--single 出单文件）
 scripts/dev.mjs               esbuild watch + 本地服务（端口 5173）
 scripts/build-hanzi.mjs       GB2312 一级字表 → 压缩编码 → 写 src/data/hanzi.ts
+scripts/build-cjk.py          fontsource 分片 → 合并 → 按 3755 字 subset → src/assets/cjk/*.woff2
 ```
 
 数据流：`面板/链接 → Config → buildArt()（字形 + 排布 + 时间 + 登场时间图）→ Scene.draw(t) → 预览 rAF 循环 / 导出离线帧循环 → VideoEncoder → mp4-muxer → Blob → 下载`。预览和导出共用同一个 `draw(t)`，但各有各的时钟：预览读真实时间，导出用 `t = i / total`。
@@ -163,14 +208,16 @@ scripts/build-hanzi.mjs       GB2312 一级字表 → 压缩编码 → 写 src/d
 ## 已知限制
 
 - **汉字覆盖 GB2312 一级字表 3755 字，不是全集**。二级字表（约 3008 字，含大量生僻字）、日文假名、emoji 都不支持 —— 缺字会在面板上给出"这些字符没有字形：…"的提示，并且**不会被系统字体顶替**（顶替会画成印刷体，混在手写里更假）。想扩到 GB2312 全集 / GB18030，改 `scripts/build-hanzi.mjs` 里的 `gb2312Level1()` 再跑一次生成脚本即可，代价是单文件体积按比例变大（3755 字 ≈ 4.7MB，全集约 8–10MB）。
-- **中文字形是楷书轮廓，不是手写体**。它来自 Arphic 楷书（Make Me a Hanzi），本身比 Caveat 的连笔手写更"工整"；"更像手写"靠的是四档笔迹风格（倾斜 / 加粗 / 字距 / 连笔弧）而不是换字体，所以它**仍是楷书的骨架**，不会变成行草。想真行书得换一套手写汉字数据。
+- **中文字形默认是楷书轮廓**。`kai` 来自 Arphic 楷书（Make Me a Hanzi），本身比 Caveat 的连笔手写更"工整"；想要"真实手写"就切 `brush`（马善政毛笔楷书）或 `cursive`（志莽行书）—— 这两款是**真字体字形**，只换肉不换笔顺。它们仍是楷书/行书骨架，不是狂草。
+- **中文字体只收了两款**。第三款龙藏（LongCang）能再 +2.5MB 但观感与行书接近，为控制体积没做进来（加回来的步骤见上文）。
+- **字体子集只覆盖 3755 字**。字体文件是按本站支持的字裁的，输字超出这个表就走缺字提示（不会画出字体里没有的字，也不会退回印刷体）。
 - **连笔签名是"接笔"不是"草书"**。`signature` 只在相邻两笔间距 ≤18/1024 em 时补一条短飞白弧，不会重排笔顺、不会并笔，密集字（如「麓」「鬱」）连笔很少。
 - **笔顺**：中文用笔画数据里的真实笔顺（每个字的第几笔、走向都是现成的）；拉丁字母没有笔顺标准，靠起点 + 就近接笔推导，观感接近手写但不等同书法笔顺。
 - **Safari 只能导出 WebM**（`MediaRecorder` 不支持 MP4 muxing）。界面会明确标"草稿格式"，并给出"正式导出请用 Chrome"的建议。WebM 是实时录制，掉帧风险比 MP4 高。
 - **画布上限**：单边 ≤ 4096、面积 ≤ 16777216 像素。产品只提供到 1920×1080（面积 2.07M），远低于上限；`stageSize()` 里有面积断言，不会再往上加分辨率，所以不存在"8K 白屏"这条路径。
 - **首字生成有延迟**：拉丁字符第一次出现时要跑完整条骨架管线（约几十毫秒/字）；中文首次用到某字要把 4.7MB 表拆开解码（每字几百微秒，但在同一帧里连续解四个字会有一次可见的停顿）。之后都走内存缓存。
 - **导出耗时**：1920×1080 / 150 帧在本机 Chromium 实测拉丁 5.4–5.6s、中文 7.0s（首轮冷启 10.2s，含首字构形）；低配机器会更慢，导出期间有进度条与取消。
-- **体积**：单文件产物 5.0MB（比纯拉丁版的 193.9KB 大得多），其中 4.68MB 是汉字笔画数据。接受这个体积是为了"任何常见姓名都能直接写"；嫌大就按上面的办法砍覆盖范围。
+- **体积**：单文件产物 11.7MB，其中 4.68MB 汉字笔画数据、4.0MB 是两款中文字体的 base64（2.95MB + 2.06MB woff2）。接受这个体积是为了"常见姓名都能直接写 + 两档真手写字体"；嫌大可以只留一款字体（删掉 `src/assets/cjk/cursive.*` 与 `style.css` 里对应 `@import`），或按上面的办法砍字表覆盖范围。
 - **预览分辨率**：预览画布按容器尺寸 + DPR（上限 2）绘制，和导出尺寸不同源，所以预览的细节不等于成片细节。
 
 ---
@@ -201,7 +248,30 @@ scripts/build-hanzi.mjs       GB2312 一级字表 → 压缩编码 → 写 src/d
 | 中英混排 | ✅ | 同页分别渲染拉丁与中文，无 `pageerror`；两段各自按字号倍率排布、基线对齐 |
 | 中文缺字边界 | ✅ | 3755 字表以外的字（龘 / あ / 😀）走缺字提示，不误判成"有字"，也不拿系统字体顶替 |
 
-其他实测：`npx tsc --noEmit` 通过（strict）；单文件产物 5,007.5KB（含字体 base64 与 4.68MB 汉字数据）；打开无 `pageerror`；拖动字号滑块从 input 事件到下一次 rAF 落地 10.6ms（目标 ≤16ms）；`npm run build:single` 可重复构建，`.vendor/` 里的源数据不受影响。
+**中文字体（本轮新增项的实测）**：
+
+| 项目 | 结果 | 依据 |
+| --- | --- | --- |
+| 三档字体都生效 | ✅ | 同一组「康誉」`f=kai/brush/cursive` 末帧拼图对比：内置楷书是等粗矢量楷体、马善政有明显毛笔起收笔、志莽是斜细连笔，三者笔形可辨（对比图 1920×3240） |
+| 换字体改的是笔形不是笔顺 | ✅ | 骨架始终来自 `medians`；`brush` 分支只把中线按字体墨迹包围盒等比缩放 + 中心对齐，`buildReveal` 重算登场时间图；t=0.2/0.35/0.5/0.65/1.0 阶梯截图逐帧仍是"按笔顺一笔一笔推进"，无整字闪现 |
+| 字体缺失自动回退 | ✅ | 人为把 `f=brush` 指向缺字（`inkCount < 30`）时 `buildHanziGlyph` 内部 `return buildHanziGlyph(ch,'kai')`，不出现空白字 |
+| 切字体耗时 | ✅ | `#cjkFont` brush → cursive 重建到画面落地 **98ms**，cursive → kai **41ms**；`__art.glyphs[].glyph.fontFamily` 正确变成 `ZMX Cursive` / 空 |
+| 字体就绪后才重建 | ✅ | `boot()` 与 `reloadCjkFont()` 都先 `await ensureCjkFont(key)` 再 `clearGlyphCache()`，`document.fonts` 里可见 `MSZ Brush:loaded` / `ZMX Cursive:loaded`，不会先画成系统字体再跳变 |
+| 换字体仍确定性 | ✅ | 同一页连续两次 `draw(ctx, 0.6, {quality:'hi'})` 的 `toDataURL()` 完全相同 |
+| 字体子集体积 | ✅ | `brush.woff2` 2,954KB / `cursive.woff2` 2,057KB（各 3755 字、84 个 fontsource 分片全命中）；`build-cjk.py` 可重复执行，产物稳定 |
+
+**装饰八档动作（本轮新增项的实测）**：
+
+| 项目 | 结果 | 依据 |
+| --- | --- | --- |
+| 八档都能跑 | ✅ | `motions.py` 对 star 装饰 × 8 动作 × t=0.55/0.7/0.85/1.0 出图，8 组 `errors: []`，拼图 `motions_grid.png` 每档位置/角度互不相同 |
+| 动作是连续演算 | ✅ | 同一动作在不同 `t` 的装饰坐标/角度都变（`orbit` 沿椭圆换位、`drop` 从高处下落并弹跳、`swing` 摆角衰减、`breathe` 尺寸起伏），不是开关式淡入淡出 |
+| 适配提示可用 | ✅ | 默认「太阳 + 收尾弹出」时 `#motionHint` = 「建议换成「绕字旋转」：太阳适合绕字公转，像给名字打光。当前「收尾弹出」也能跑，只是没那么贴。」；选成推荐动作后提示变为「适配：… —— 为什么」 |
+| 多动作不影响帧数/一致性 | ✅ | 换动作后导出仍是 150 帧（见下表），同 t 两帧字节一致 |
+
+其他实测：`npx tsc --noEmit` 通过（strict）；单文件产物 11,983,769 B（11,693.5KB js+css，含两款中文字体 base64 与 4.68MB 汉字数据）；打开无 `pageerror`；拖动字号滑块从 input 事件到下一次 rAF 落地 10.6ms（目标 ≤16ms）；`npm run build:single` 可重复构建，`.vendor/` 里的源数据不受影响。
+
+**本轮导出实测**：`示例导出-康誉-1920x1080.mp4`（毛笔字体 + 绕字旋转 + 五效果全开）：150 帧 / 5.0s / avc1 / 1,146,431 B，导出耗时 10.6s（含首次构形）。
 
 **笔迹风格 / 装饰 / 效果（本轮新增项的实测）**：
 

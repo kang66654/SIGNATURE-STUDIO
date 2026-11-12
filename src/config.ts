@@ -18,8 +18,18 @@ export type Ratio = '16:9' | '9:16' | '1:1';
 export type Res = '1080' | '720';
 /** 字形风格：直接作用在墨迹层，决定“像哪种笔写的” */
 export type WriteStyle = 'ink' | 'brush' | 'signature' | 'round';
-/** 装饰的入场方式：静止弹出 / 跟着笔尖走 / 悬浮漂移 */
-export type DecoMotion = 'pop' | 'follow' | 'drift';
+/** 装饰的入场方式：静止弹出 / 跟着笔尖走 / 悬浮漂移 / 绕字旋转 / 落下弹跳 / 自旋入场 / 钟摆 / 呼吸 */
+export type DecoMotion =
+  | 'pop'
+  | 'follow'
+  | 'drift'
+  | 'orbit'
+  | 'drop'
+  | 'spin'
+  | 'swing'
+  | 'breathe';
+/** 中文字体：内置楷书笔画 / 两款内嵌手写字体（体积换真实笔形，见 README） */
+export type CJKFontKey = 'kai' | 'brush' | 'cursive';
 /** 随时间轴运动的效果层，可多选 */
 export type Effect = 'trail' | 'splash' | 'pulse' | 'seal' | 'ripple';
 
@@ -34,6 +44,7 @@ export interface Config {
   decoScale: number;
   decoMotion: DecoMotion;
   style: WriteStyle;
+  cjkFont: CJKFontKey;
   effects: Effect[];
   duration: number;
   ratio: Ratio;
@@ -51,6 +62,7 @@ export const DEFAULT_CONFIG: Config = {
   decoScale: 0.7,
   decoMotion: 'pop',
   style: 'brush',
+  cjkFont: 'kai',
   effects: ['trail', 'pulse'],
   duration: 5,
   ratio: '16:9',
@@ -73,7 +85,8 @@ const DECOS: Deco[] = [
 ];
 const RATIOS: Ratio[] = ['16:9', '9:16', '1:1'];
 const STYLES: WriteStyle[] = ['ink', 'brush', 'signature', 'round'];
-const MOTIONS: DecoMotion[] = ['pop', 'follow', 'drift'];
+const MOTIONS: DecoMotion[] = ['pop', 'follow', 'drift', 'orbit', 'drop', 'spin', 'swing', 'breathe'];
+const CJK_FONTS: CJKFontKey[] = ['kai', 'brush', 'cursive'];
 const EFFECTS: Effect[] = ['trail', 'splash', 'pulse', 'seal', 'ripple'];
 
 export function encodeHash(cfg: Config): string {
@@ -88,6 +101,7 @@ export function encodeHash(cfg: Config): string {
   p.set('ds', cfg.decoScale.toFixed(2));
   p.set('dm', cfg.decoMotion);
   p.set('w', cfg.style);
+  p.set('f', cfg.cjkFont);
   p.set('fx', cfg.effects.join(','));
   p.set('t', String(cfg.duration));
   p.set('r', cfg.ratio);
@@ -113,6 +127,7 @@ export function decodeHash(hash: string): Config {
   const ratio = (p.get('r') ?? '') as Ratio;
   const style = (p.get('w') ?? '') as WriteStyle;
   const motion = (p.get('dm') ?? '') as DecoMotion;
+  const cjkFont = (p.get('f') ?? '') as CJKFontKey;
   const fxRaw = p.get('fx');
   const effects = fxRaw === null
     ? DEFAULT_CONFIG.effects
@@ -128,6 +143,7 @@ export function decodeHash(hash: string): Config {
     decoScale: clamp(num('ds', DEFAULT_CONFIG.decoScale), 0.4, 1.2),
     decoMotion: MOTIONS.includes(motion) ? motion : DEFAULT_CONFIG.decoMotion,
     style: STYLES.includes(style) ? style : DEFAULT_CONFIG.style,
+    cjkFont: CJK_FONTS.includes(cjkFont) ? cjkFont : DEFAULT_CONFIG.cjkFont,
     effects: [...new Set(effects)],
     duration: clamp(Math.round(num('t', DEFAULT_CONFIG.duration)), 3, 10),
     ratio: RATIOS.includes(ratio) ? ratio : DEFAULT_CONFIG.ratio,

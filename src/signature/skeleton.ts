@@ -7,6 +7,8 @@
  */
 
 import { HANZI_EM, hanziShape, hasHanzi } from './hanzi';
+import { cjkFamily } from './cjkfont';
+import type { CJKFontKey } from '../config';
 
 export interface StrokePoint {
   x: number;
@@ -38,6 +40,8 @@ export interface Glyph {
    * 有它就不用 fillText 画“肉”，直接填路径，笔形才不会被系统字体带跑。
    */
   paths?: Path2D[];
+  /** 汉字走外部字体时，肉靠 fillText 画，这里记下要用的字体族 */
+  fontFamily?: string;
 }
 
 /** 骨架生成的基准字号：所有字形按这个尺寸算，排版时按比例缩放 */
@@ -121,12 +125,12 @@ export function clearGlyphCache() {
   cacheEpoch++;
 }
 
-export function getGlyph(ch: string): Glyph | null {
-  const key = `${cacheEpoch}:${ch}`;
+export function getGlyph(ch: string, fontKey: CJKFontKey = 'kai'): Glyph | null {
+  const key = `${cacheEpoch}:${fontKey}:${ch}`;
   const hit = glyphCache.get(key);
   if (hit) return hit;
   if (missCache.has(key)) return null;
-  const g = buildGlyph(ch);
+  const g = buildGlyph(ch, fontKey);
   if (!g) {
     missCache.add(key);
     return null;
@@ -135,10 +139,10 @@ export function getGlyph(ch: string): Glyph | null {
   return g;
 }
 
-function buildGlyph(ch: string): Glyph | null {
+function buildGlyph(ch: string, fontKey: CJKFontKey = 'kai'): Glyph | null {
   if (!ch.trim()) return null;
   // 汉字走另一条路：用真实笔画数据，不依赖手写体是否覆盖
-  if (hasHanzi(ch)) return buildHanziGlyph(ch);
+  if (hasHanzi(ch)) return buildHanziGlyph(ch, fontKey);
   // 其余只认手写体本身覆盖的字符；否则系统字体会顶上来，画出来是“印刷体”混在手写里。
   // 字体还没就绪时先跳过这项检查，等 document.fonts 完成后缓存会被清掉重算。
   if (document.fonts.status === 'loaded' && !hasHandwritingGlyph(ch)) return null;
@@ -222,9 +226,10 @@ function buildGlyph(ch: string): Glyph | null {
  * 汉字字形：墨迹取笔画轮廓（矢量填充，笔形 100% 听数据的），骨架取中线折线（顺序就是真笔顺）。
  * 不用细化、不用缝合、不用猜笔顺 —— 数据本身已经把这三件事做完了。
  */
-function buildHanziGlyph(ch: string): Glyph | null {
+function buildHanziGlyph(ch: string, fontKey: CJKFontKey = 'kai'): Glyph | null {
   const shape = hanziShape(ch);
   if (!shape || !shape.medians.length) return null;
+  const family = cjkFamily(fontKey);
 
   // 笔画数据是 y 向上的（基线 y≈0，字身往正方向长），屏幕/位图 y 向下。
   // 这里统一翻一次：位图用 setTransform 的负 scale，中线把 y 取负，后面就全是屏幕坐标。
@@ -235,30 +240,90 @@ function buildHanziGlyph(ch: string): Glyph | null {
   const baseline = Math.ceil(ascData * k) + PAD;
   const H = Math.ceil((ascData + descData) * k) + PAD * 2;
 
-  const paths = shape.paths.map((d) => new Path2D(d));
+  const paths = family ? undefined : shape.paths.map((d) => new Path2D(d));
 
   const c = document.createElement('canvas');
   c.width = W;
   c.height = H;
   const g2 = c.getContext('2d', { willReadFrequently: true })!;
-  g2.setTransform(k, 0, 0, -k, PAD, baseline);
   g2.fillStyle = '#fff';
-  for (const p of paths) g2.fill(p);
+  if (family) {
+    // 外部字体：按 1em = 1024 单位、基线落在数据 y=0 处排字，屏幕方向直接画（不翻转）
+    g2.setTransform(k, 0, 0, k, PAD, baseline);
+    g2.font = `${HANZI_EM}px "${family}"`;
+    g2.fillText(ch, 0, 0);
+  } else {
+    g2.setTransform(k, 0, 0, -k, PAD, baseline);
+    for (const p of paths!) g2.fill(p);
+  }
   g2.setTransform(1, 0, 0, 1, 0, 0);
 
   const img = g2.getImageData(0, 0, W, H).data;
   const bin = new Uint8Array(W * H);
-  for (let i = 0; i < W * H; i++) bin[i] = img[i * 4 + 3] > 40 ? 1 : 0;
+  let inkCount = 0;
+  for (let i = 0; i < W * H; i++) {
+    const on = img[i * 4 + 3] > 40 ? 1 : 0;
+    bin[i] = on;
+    if (on) inkCount++;
+  }
+  // 字体里没有这个字（或缺字），退回内置楷书笔画，不留白
+  if (family && inkCount < 30) return buildHanziGlyph(ch, 'kai');
 
   const dist = distanceField(bin, W, H);
+
+  // 笔画点用的是「基线原点」坐标系（x 相对笔画框左缘、y 相对基线向上为负），
+  // buildReveal 与排版都按这个口径，所以这里换算完要把 PAD / baseline 减回去。
+  let mapX = (x: number) => x * k;
+  let mapY = (y: number) => -y * k;
+  if (family) {
+    let bx0 = W;
+    let by0 = H;
+    let bx1 = -1;
+    let by1 = -1;
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        if (!bin[y * W + x]) continue;
+        if (x < bx0) bx0 = x;
+        if (x > bx1) bx1 = x;
+        if (y < by0) by0 = y;
+        if (y > by1) by1 = y;
+      }
+    }
+    let m0x = Infinity;
+    let m0y = Infinity;
+    let m1x = -Infinity;
+    let m1y = -Infinity;
+    for (const med of shape.medians) {
+      for (const [mx, my] of med) {
+        const px = mx * k;
+        const py = -my * k;
+        if (px < m0x) m0x = px;
+        if (px > m1x) m1x = px;
+        if (py < m0y) m0y = py;
+        if (py > m1y) m1y = py;
+      }
+    }
+    const sx = (bx1 - bx0) / Math.max(1, m1x - m0x);
+    const sy = (by1 - by0) / Math.max(1, m1y - m0y);
+    // 等比缩放，避免把笔画拉得过扁或过长；再让两者中心对齐
+    const s = Math.min(sx, sy);
+    const mc = (m0x + m1x) / 2;
+    const mcy = (m0y + m1y) / 2;
+    const bc = (bx0 + bx1) / 2 - PAD; // 墨迹框中心，换算回基线原点坐标
+    const bcy = (by0 + by1) / 2 - baseline;
+    mapX = (x: number) => bc + (x * k - mc) * s;
+    mapY = (y: number) => bcy + (-y * k - mcy) * s;
+  }
 
   const strokes: Stroke[] = [];
   for (const med of shape.medians) {
     const pts: StrokePoint[] = med.map(([x, y]) => {
-      const px = Math.min(W - 1, Math.max(0, Math.round(x * k + PAD)));
-      const py = Math.min(H - 1, Math.max(0, Math.round(baseline - y * k)));
+      const lx = mapX(x);
+      const ly = mapY(y);
+      const px = Math.min(W - 1, Math.max(0, Math.round(lx + PAD)));
+      const py = Math.min(H - 1, Math.max(0, Math.round(ly + baseline)));
       const d = dist[py * W + px] || 1;
-      return { x: x * k, y: -y * k, w: Math.max(1.6, d * 2) };
+      return { x: lx, y: ly, w: Math.max(1.6, d * 2) };
     });
     // 单点笔画（“点”）也要能占一段时间，补一个略偏移的点
     if (pts.length === 1) pts.push({ x: pts[0].x + 1.4, y: pts[0].y + 0.4, w: pts[0].w });
@@ -285,6 +350,7 @@ function buildHanziGlyph(ch: string): Glyph | null {
     raster: { w: W, h: H, base: baseline, pad: PAD },
     reveal,
     paths,
+    fontFamily: family ?? undefined,
   };
 }
 

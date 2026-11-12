@@ -113,8 +113,14 @@
                   <option value="pop">收尾弹出</option>
                   <option value="follow">跟随笔尖</option>
                   <option value="drift">悬浮漂移</option>
+                  <option value="orbit">绕字旋转</option>
+                  <option value="drop">落下弹跳</option>
+                  <option value="spin">自旋入场</option>
+                  <option value="swing">钟摆摇晃</option>
+                  <option value="breathe">呼吸缩放</option>
                 </select>
               </label>
+              <p class="note hint" id="motionHint"></p>
               <label class="field slider">
                 <span>装饰倍率</span>
                 <input id="decoScale" type="range" min="0.4" max="1.2" step="0.05" />
@@ -129,6 +135,14 @@
 
             <fieldset class="group">
               <legend class="mono">05 / 字形与效果</legend>
+              <label class="field">
+                <span>中文字体</span>
+                <select id="cjkFont">
+                  <option value="kai">楷书 · 内置笔画</option>
+                  <option value="brush">毛笔楷书 · 马善政</option>
+                  <option value="cursive">行书 · 志莽</option>
+                </select>
+              </label>
               <label class="field">
                 <span>笔迹风格</span>
                 <select id="style">

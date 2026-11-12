@@ -39,15 +39,19 @@ const STYLE_PARAMS: Record<WriteStyle, StyleParams> = {
 function drawGlyphInk(ctx: CanvasRenderingContext2D, g: PlacedGlyph, style: WriteStyle = 'ink') {
   const gp = g.glyph;
   const sp = STYLE_PARAMS[style];
+  const external = !!gp.fontFamily;
   ctx.save();
-  // 倾斜作用在屏幕坐标里：基线上不动、字头往右倒，像快速连笔的手写
+  // 倾斜作用在屏幕坐标里：基线上不动、字头往右倒，像快速连笔的手写。
+  // 外部手写字体本身已经歪了，倾斜打对折，否则会倒得站不住。
   ctx.translate(g.x, g.y);
-  if (sp.lean) ctx.transform(1, 0, -sp.lean, 1, 0, 0);
+  const lean = external ? sp.lean * 0.65 : sp.lean;
+  if (lean) ctx.transform(1, 0, -lean, 1, 0, 0);
 
   if (!gp.paths) {
+    if (gp.fontFamily) ctx.font = `${g.size}px "${gp.fontFamily}"`;
     ctx.fillText(g.ch, 0, 0);
-    if (sp.bold > 12) {
-      // 拉丁也用同色描边把笔画压粗一档，粗细口径与汉字一致
+    // 只有内置细笔需要额外描边加粗；手写字体自带的笔锋再描边会糊成一坨
+    if (sp.bold > 12 && !external) {
       ctx.lineWidth = ((sp.bold - 12) / 1024) * g.size;
       ctx.lineJoin = 'round';
       ctx.strokeText(g.ch, 0, 0);
@@ -297,6 +301,73 @@ export class Scene {
       const y = d.y + Math.sin(ph) * r * 0.22;
       const rot = Math.sin(ph * 0.5) * 0.16;
       drawDeco(ctx, d.kind, d.x, y, r, d.color, Math.min(1, kk * 2), easeOutBack(kk), rot);
+      return;
+    }
+
+    // 名字的包围盒，绕字/落点都得按它算，不能拍脑袋写死
+    const b = art.box;
+    const cx = b.x + b.w / 2;
+    const cy = b.y + b.h / 2;
+
+    if (art.decoMotion === 'orbit') {
+      // 绕名字外圈公转：入场后沿椭圆轨道转，装饰自己也跟着转
+      const rx = b.w / 2 + r * 1.35;
+      const ry = b.h / 2 + r * 1.05;
+      const reveal = Math.min(1, kk * 1.4); // 从锚点滑进轨道
+      const ph = (t - d.at) * Math.PI * 2 * 0.55 - Math.PI / 2;
+      const ox = cx + Math.cos(ph) * rx;
+      const oy = cy + Math.sin(ph) * ry;
+      const x = d.x + (ox - d.x) * reveal;
+      const y = d.y + (oy - d.y) * reveal;
+      drawDeco(ctx, d.kind, x, y, r, d.color, Math.min(1, kk * 2), 1, ph + Math.PI / 2);
+      return;
+    }
+
+    if (art.decoMotion === 'drop') {
+      // 从上方落下 + 三次衰减弹跳，落点就是锚点
+      const hMax = r * 3.2;
+      const T = 0.34; // 一次弹跳的总时长（占总时长比例）
+      const u = Math.min(1, (t - d.at) / T);
+      const fall = u * u; // 加速下落
+      let lift = (1 - fall) * hMax;
+      if (u >= 1) {
+        const rest = t - d.at - T;
+        const amp = hMax * 0.32;
+        const bounce = Math.abs(Math.sin(rest * Math.PI * 3.2)) * amp * Math.exp(-rest * 9);
+        lift = bounce;
+      }
+      const rot = (1 - Math.min(1, (t - d.at) / 0.22)) * -0.5;
+      drawDeco(ctx, d.kind, d.x, d.y - lift, r, d.color, Math.min(1, kk * 2), 1, rot);
+      return;
+    }
+
+    if (art.decoMotion === 'spin') {
+      // 自旋入场：从背对观众转到正面，缩放到 1，之后慢慢自转
+      const e = easeOutBack(Math.min(1, (t - d.at) / 0.28));
+      const sc = Math.max(0.001, e);
+      const rot = (1 - Math.min(1, (t - d.at) / 0.28)) * -Math.PI * 1.5 + Math.sin(t * Math.PI * 4) * 0.12;
+      drawDeco(ctx, d.kind, d.x, d.y, r, d.color, Math.min(1, kk * 1.8), sc, rot);
+      return;
+    }
+
+    if (art.decoMotion === 'swing') {
+      // 挂在锚点上方一个支点上的钟摆：摆幅逐渐收小，停在锚点正上方
+      const pivotY = d.y - r * 1.9;
+      const arm = r * 1.9;
+      const damp = Math.exp(-(t - d.at) * 6);
+      const ang = Math.sin((t - d.at) * Math.PI * 2 * 1.35) * 0.5 * damp;
+      const x = d.x + Math.sin(ang) * arm;
+      const y = pivotY + Math.cos(ang) * arm;
+      drawDeco(ctx, d.kind, x, y, r, d.color, Math.min(1, kk * 2), 1, ang);
+      return;
+    }
+
+    if (art.decoMotion === 'breathe') {
+      // 呼吸缩放：入场后一胀一缩，透明度同步起伏
+      const ph = (t - d.at) * Math.PI * 2 * 0.8;
+      const sc = (1 + Math.sin(ph) * 0.1) * easeOutBack(kk);
+      const alpha = (0.78 + 0.22 * (0.5 + 0.5 * Math.sin(ph))) * Math.min(1, kk * 2);
+      drawDeco(ctx, d.kind, d.x, d.y, r, d.color, alpha, sc, Math.sin(ph) * 0.04);
       return;
     }
     drawDeco(ctx, d.kind, d.x, d.y, r, d.color, Math.min(1, kk * 2), easeOutBack(kk));

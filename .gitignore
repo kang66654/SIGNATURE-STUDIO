@@ -15,6 +15,9 @@ dist/
 # 日志
 *.log
 
+# 中文字体构建的中间分片（可由 python scripts/build-cjk.py 重新拉取，5.9MB，不入库）
+src/assets/cjk/shards/
+
 # 系统
 .DS_Store
 Thumbs.db

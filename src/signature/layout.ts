@@ -2,7 +2,7 @@ import type { Config } from '../config';
 import { stageSize } from '../config';
 import { getGlyph, NOMINAL_PX } from './skeleton';
 import type { Glyph, StrokePoint } from './skeleton';
-import type { Deco, DecoMotion, Effect, WriteStyle } from '../config';
+import type { Deco, DecoMotion, Effect, WriteStyle, CJKFontKey } from '../config';
 
 export interface PlacedStroke {
   pts: StrokePoint[];
@@ -57,6 +57,7 @@ export interface Art {
   mapH: number;
   /** 字形风格与图层开关，跟着 Art 一起走，导出与预览共用 */
   style: WriteStyle;
+  cjkFont: CJKFontKey;
   decoMotion: DecoMotion;
   effects: Effect[];
 }
@@ -91,7 +92,7 @@ export function buildArt(cfg: Config): Art {
     const glyphs: Glyph[] = [];
     for (const ch of chars) {
       if (ch === ' ') continue;
-      const g = getGlyph(ch);
+      const g = getGlyph(ch, cfg.cjkFont);
       if (g) glyphs.push(g);
       else missing.push(ch);
     }
@@ -196,7 +197,7 @@ export function buildArt(cfg: Config): Art {
   const box = boundsOf(glyphs);
   const key = [
     W, H, cfg.nameA, cfg.nameB, cfg.colorA, cfg.colorB, cfg.scaleA, cfg.scaleB, cfg.deco, cfg.decoScale,
-    cfg.style,
+    cfg.style, cfg.cjkFont,
   ].join('|');
 
   const mapW = Math.ceil(W / 2);
@@ -206,6 +207,7 @@ export function buildArt(cfg: Config): Art {
   return {
     W, H, glyphs, strokes, deco, missing, key, box, map, mapW, mapH,
     style: cfg.style,
+    cjkFont: cfg.cjkFont,
     decoMotion: cfg.decoMotion,
     effects: cfg.effects,
   };

@@ -43,12 +43,13 @@ async function main() {
   const html = await readFile(path.join(root, 'index.html'), 'utf8');
 
   if (single) {
-    // 单文件版：样式与脚本全部内联，双击即可打开
+    // 单文件版：样式与脚本全部内联，双击即可打开。
+    // 注意必须用函数式替换：压缩后的 js 里带 `$` 开头的标识符，字符串替换会把 $& / $' 当占位符吃掉正文。
     const out = html
-      .replace('<link rel="stylesheet" href="./src/style.css" />', `<style>\n${css}\n</style>`)
+      .replace('<link rel="stylesheet" href="./src/style.css" />', () => `<style>\n${css}\n</style>`)
       .replace(
         '<script type="module" src="./src/main.ts"></script>',
-        `<script type="module">\n${js}\n</script>`,
+        () => `<script type="module">\n${js}\n</script>`,
       );
     await writeFile(path.join(outDir, '签名生成器.html'), out, 'utf8');
   } else {
