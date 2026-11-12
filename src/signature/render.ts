@@ -20,8 +20,9 @@ function drawGlyphInk(ctx: CanvasRenderingContext2D, g: PlacedGlyph) {
   }
   const scale = g.size / 1024;
   ctx.save();
-  ctx.translate(g.x, g.y - 900 * scale);
-  ctx.scale(scale, scale);
+  // 笔画数据的 y 轴向上（基线 y=0），屏幕 y 向下，所以这里把 y 翻过来
+  ctx.translate(g.x, g.y);
+  ctx.scale(scale, -scale);
   // 宋体级笔画在签名里偏瘦，按 1.2% em 描一圈同色边把墨迹加粗一档（笔形不变，只是长肉）
   const bold = ctx.lineWidth;
   ctx.lineWidth = 12;

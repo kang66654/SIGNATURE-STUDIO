@@ -174,9 +174,9 @@ export function buildArt(cfg: Config): Art {
     const g = anchor.glyph;
     const s = anchor.size / NOMINAL_PX;
     const r = shortSide * 0.055 * cfg.decoScale;
-    // 贴着最后一个字：横向落在字身中线偏右，纵向压在字顶上方一点，别飘到画布边缘
+    // 贴着最后一个字：横向落在字身中线偏右，纵向压在字顶上方（留出一个半径的呼吸，别压住字头）
     const x = anchor.x + (g.adv * s) * 0.62;
-    const y = Math.max(r * 1.6, anchor.y - g.asc * s - r * 0.55);
+    const y = Math.max(r * 1.6, anchor.y - g.asc * s - r * 1.25);
     deco = {
       kind: cfg.deco,
       x,

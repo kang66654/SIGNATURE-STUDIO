@@ -6,7 +6,7 @@
  * 汉字走另一条路（buildHanziGlyph）：墨迹直接取笔画轮廓，骨架直接取中线，笔顺是数据里写死的。
  */
 
-import { HANZI_BASELINE, HANZI_EM, hanziShape, hasHanzi } from './hanzi';
+import { HANZI_EM, hanziShape, hasHanzi } from './hanzi';
 
 export interface StrokePoint {
   x: number;
@@ -226,10 +226,14 @@ function buildHanziGlyph(ch: string): Glyph | null {
   const shape = hanziShape(ch);
   if (!shape || !shape.medians.length) return null;
 
+  // 笔画数据是 y 向上的（基线 y≈0，字身往正方向长），屏幕/位图 y 向下。
+  // 这里统一翻一次：位图用 setTransform 的负 scale，中线把 y 取负，后面就全是屏幕坐标。
   const k = NOMINAL_PX / HANZI_EM;
   const W = Math.ceil(NOMINAL_PX) + PAD * 2;
-  const baseline = Math.ceil(HANZI_BASELINE * k) + PAD;
-  const H = Math.ceil(baseline + (HANZI_EM - HANZI_BASELINE) * k) + PAD;
+  const ascData = HANZI_EM; // 字身可能略超 em，留足
+  const descData = 128;
+  const baseline = Math.ceil(ascData * k) + PAD;
+  const H = Math.ceil((ascData + descData) * k) + PAD * 2;
 
   const paths = shape.paths.map((d) => new Path2D(d));
 
@@ -237,7 +241,7 @@ function buildHanziGlyph(ch: string): Glyph | null {
   c.width = W;
   c.height = H;
   const g2 = c.getContext('2d', { willReadFrequently: true })!;
-  g2.setTransform(k, 0, 0, k, PAD, baseline - HANZI_BASELINE * k);
+  g2.setTransform(k, 0, 0, -k, PAD, baseline);
   g2.fillStyle = '#fff';
   for (const p of paths) g2.fill(p);
   g2.setTransform(1, 0, 0, 1, 0, 0);
@@ -252,9 +256,9 @@ function buildHanziGlyph(ch: string): Glyph | null {
   for (const med of shape.medians) {
     const pts: StrokePoint[] = med.map(([x, y]) => {
       const px = Math.min(W - 1, Math.max(0, Math.round(x * k + PAD)));
-      const py = Math.min(H - 1, Math.max(0, Math.round((y - HANZI_BASELINE) * k + baseline)));
+      const py = Math.min(H - 1, Math.max(0, Math.round(baseline - y * k)));
       const d = dist[py * W + px] || 1;
-      return { x: x * k, y: (y - HANZI_BASELINE) * k, w: Math.max(1.6, d * 2) };
+      return { x: x * k, y: -y * k, w: Math.max(1.6, d * 2) };
     });
     // 单点笔画（“点”）也要能占一段时间，补一个略偏移的点
     if (pts.length === 1) pts.push({ x: pts[0].x + 1.4, y: pts[0].y + 0.4, w: pts[0].w });
