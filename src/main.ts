@@ -51,10 +51,15 @@ function updateSpecs() {
 }
 
 function updateMissing() {
+  const fallback = [...new Set(art.fontFallback)].join(' ');
   if (art.missing.length) {
     const list = [...new Set(art.missing)].join(' ');
     panel.setMissing(
-      `这些字符没有字形：${list}。可用范围＝拉丁字母、数字、常见标点，加 GB2312 一级字表的 3755 个汉字；其余生僻字、日文假名、emoji 暂不支持。`,
+      `这些字符没有字形：${list}。可用范围＝拉丁字母、数字、常见标点，加 GB2312 全部 6763 个汉字（一级 3755 + 二级 3008）；GBK 扩展区生僻字（如「玥」「旻」）、日文假名、emoji 暂不支持。`,
+    );
+  } else if (fallback) {
+    panel.setMissing(
+      `所选手写字体只裁了常用字，「${fallback}」在里面没有字形，整个名字已改用内置楷书，避免一半毛笔一半楷书。`,
     );
   } else {
     panel.setMissing(null);

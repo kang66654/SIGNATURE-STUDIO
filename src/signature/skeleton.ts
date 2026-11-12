@@ -7,7 +7,7 @@
  */
 
 import { HANZI_EM, hanziShape, hasHanzi } from './hanzi';
-import { cjkFamily } from './cjkfont';
+import { cjkFamily, cjkCover } from './cjkfont';
 import type { CJKFontKey } from '../config';
 
 export interface StrokePoint {
@@ -42,6 +42,8 @@ export interface Glyph {
   paths?: Path2D[];
   /** 汉字走外部字体时，肉靠 fillText 画，这里记下要用的字体族 */
   fontFamily?: string;
+  /** 要求了手写字体但字体里没有这个字（已自动退回内置楷书），供上层给出提示 */
+  fellBack?: boolean;
 }
 
 /** 骨架生成的基准字号：所有字形按这个尺寸算，排版时按比例缩放 */
@@ -229,6 +231,11 @@ function buildGlyph(ch: string, fontKey: CJKFontKey = 'kai'): Glyph | null {
 function buildHanziGlyph(ch: string, fontKey: CJKFontKey = 'kai'): Glyph | null {
   const shape = hanziShape(ch);
   if (!shape || !shape.medians.length) return null;
+  // 字体里没有这个字就别硬画：浏览器会偷偷换系统字体，画出来是印刷体
+  if (fontKey !== 'kai' && !cjkCover(fontKey, ch)) {
+    const g = buildHanziGlyph(ch, 'kai');
+    return g ? { ...g, fellBack: true } : null;
+  }
   const family = cjkFamily(fontKey);
 
   // 笔画数据是 y 向上的（基线 y≈0，字身往正方向长），屏幕/位图 y 向下。
@@ -266,8 +273,11 @@ function buildHanziGlyph(ch: string, fontKey: CJKFontKey = 'kai'): Glyph | null 
     bin[i] = on;
     if (on) inkCount++;
   }
-  // 字体里没有这个字（或缺字），退回内置楷书笔画，不留白
-  if (family && inkCount < 30) return buildHanziGlyph(ch, 'kai');
+  // 字体里没有这个字（或缺字），退回内置楷书笔画，不留白；并打标记让面板给出提示
+  if (family && inkCount < 30) {
+    const g = buildHanziGlyph(ch, 'kai');
+    return g ? { ...g, fellBack: true } : null;
+  }
 
   const dist = distanceField(bin, W, H);
 

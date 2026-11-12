@@ -1,4 +1,5 @@
 import type { CJKFontKey } from '../config';
+import { BRUSH_COVER, CURSIVE_COVER } from './cjkCover';
 
 /**
  * 中文字体表。
@@ -15,6 +16,25 @@ export const CJK_FONTS: Array<{ key: CJKFontKey; family: string; label: string }
 export function cjkFamily(key: CJKFontKey): string | null {
   const hit = CJK_FONTS.find((f) => f.key === key);
   return hit && hit.family ? hit.family : null;
+}
+
+const coverSets = new Map<CJKFontKey, Set<string>>();
+const COVER_SRC: Partial<Record<CJKFontKey, string>> = { brush: BRUSH_COVER, cursive: CURSIVE_COVER };
+
+/**
+ * 这款矢量手写体里到底有没有这个字。
+ * 不能靠“画出来有没有墨”判断：浏览器在字体缺字时会静默换系统字体顶上，
+ * 画出来是一行印刷体，混在手写里比缺字更难看。
+ */
+export function cjkCover(key: CJKFontKey, ch: string): boolean {
+  const src = COVER_SRC[key];
+  if (!src) return true; // 内置楷书用笔画数据，覆盖范围由 hanzi.ts 决定
+  let set = coverSets.get(key);
+  if (!set) {
+    set = new Set(src);
+    coverSets.set(key, set);
+  }
+  return set.has(ch);
 }
 
 /** 中文字体就绪检测：字体没到之前栅格化会掉到系统字体上，画出来是印刷体 */

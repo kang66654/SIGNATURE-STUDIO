@@ -43,8 +43,8 @@ node_modules\@rollup\rollup-win32-x64-msvc\rollup.win32-x64-msvc.node  →  ERR_
 ### 中文姓名是怎么写出来的
 
 1. 笔画数据来自 [hanzi-writer-data](https://github.com/chanind/hanzi-writer-data)（2.0.1，源自 Make Me a Hanzi / Arphic 楷书，遵循 Arphic Public License，许可原文见 `src/data/ARPHICPL.txt`）。
-2. `scripts/build-hanzi.mjs` 用 `TextDecoder('gbk')` 遍历 GB2312 `0xB0A1–0xD7F9`，解出**一级字表 3755 个汉字**，逐字取 `strokes`（每笔的 SVG 轮廓路径）与 `medians`（每笔的中线点列）。
-3. 坐标量化成 0–1023 整数，每个坐标 2 位 base36（36²=1296 > 1024，**无损**），笔画间用 `#`、轮廓与中线间用 `$` 分隔，`HANZI_CHARS` / `HANZI_DATA` 两张平行表写进 `src/data/hanzi.ts`（4.9MB 源码，运行时约 4.68MB 字符）。
+2. `scripts/build-hanzi.mjs` 用 `TextDecoder('gbk')` 遍历 GB2312 `0xB0A1–0xF7FE`，解出**全部 6763 个汉字**（一级 3755 常用 + 二级 3008 次常用，如「婷」「毓」都在二级），逐字取 `strokes`（每笔的 SVG 轮廓路径）与 `medians`（每笔的中线点列）。
+3. 坐标量化成 0–1023 整数，每个坐标 2 位 base36（36²=1296 > 1024，**无损**），笔画间用 `#`、轮廓与中线间用 `$` 分隔，`HANZI_CHARS` / `HANZI_DATA` 两张平行表写进 `src/data/hanzi.ts`（9.1MB 源码，6763 字）。
 4. 运行时 `src/signature/hanzi.ts` 首次用到某字才拆表、解码、缓存；`buildHanziGlyph` 把**笔画轮廓**填成墨迹（矢量，跟系统字体无关，任何机器一致），把 `medians` 当作骨架与笔顺（数组顺序就是真实笔顺，不需要细化/合段/猜顺序）。注意这套数据的 **y 轴是向上的**（基线 y≈0，字身往正方向长），而屏幕 y 向下，所以装配位图和渲染矢量时各翻一次 y，别直接把 y 当屏幕坐标用 —— 这是第一版"中文整个上下颠倒"的根因。
 5. 仍然复用同一套登场时间图与遮罩：沿中线铺种子做两轮 BFS，得到"每个墨迹像素属于第几笔、走到这一笔的百分之几"，逐帧揭开。
 6. 楷书笔画偏瘦，`drawGlyphInk` 在填完轮廓后按 1.2% em 同色描一圈边给墨迹"长肉"，笔形不变。
@@ -54,9 +54,12 @@ node_modules\@rollup\rollup-win32-x64-msvc\rollup.win32-x64-msvc.node  →  ERR_
 
 | 选项 | 字体族 | 来源 | 授权 | 体积（3755 字子集） |
 | --- | --- | --- | --- | --- |
-| `kai` 楷书 · 内置笔画 | 无（矢量轮廓 + 笔顺数据） | hanzi-writer-data / Arphic | Arphic Public License | 0（数据已含） |
-| `brush` 毛笔楷书 · 马善政 | `MSZ Brush` = Ma Shan Zheng | [@fontsource/ma-shan-zheng](https://fontsource.org/fonts/ma-shan-zheng) 5.3.1 | OFL-1.1 | 2.95MB |
-| `cursive` 行书 · 志莽 | `ZMX Cursive` = Zhi Mang Xing | [@fontsource/zhi-mang-xing](https://fontsource.org/fonts/zhi-mang-xing) 5.3.0 | OFL-1.1 | 2.06MB |
+| `kai` 楷书 · 内置笔画 | 无（矢量轮廓 + 笔顺数据） | hanzi-writer-data / Arphic | Arphic Public License | 0（数据已含，6763 字全覆盖） |
+| `brush` 毛笔楷书 · 马善政 | `MSZ Brush` = Ma Shan Zheng | [@fontsource/ma-shan-zheng](https://fontsource.org/fonts/ma-shan-zheng) 5.3.1 | OFL-1.1 | 2.95MB（一级 3755 字） |
+| `cursive` 行书 · 志莽 | `ZMX Cursive` = Zhi Mang Xing | [@fontsource/zhi-mang-xing](https://fontsource.org/fonts/zhi-mang-xing) 5.3.0 | OFL-1.1 | 2.06MB（一级 3755 字） |
+
+**字表覆盖与字体覆盖不是一回事**：笔画数据（也就是"能不能写这个字"）覆盖 GB2312 全部 6763 字；两款手写字体为了控体积只裁了一级字表 3755 字。「婷」这类二级字在毛笔/行书里没有字形时，`cjkCover()`（`src/signature/cjkCover.ts`，由 `scripts/cover-cjk.py` 从字体 cmap 导出）会先拦下来 —— **整个名字统一退回内置楷书**，面板同时说明「所选手写字体只裁了常用字，「婷」在里面没有字形……」。
+为什么不能只查"画出来有没有墨"：字体缺字时浏览器会**静默**换系统字体顶上，画出来是一行印刷体和手写混在一起，比直接退回楷书更难看。所以必须有明确的 cmap 清单。
 
 **为什么不整份塞字体**：两款字体的全量 TTF 各 5–10MB，直接内联会把单文件推到 30MB。`scripts/build-cjk.py` 走的是"按本站支持的字裁剪"：读 `src/data/hanzi.ts` 的 `HANZI_CHARS`（3755 字）→ 拉 fontsource 的 `index.css` 解析每个分片的 `unicode-range` → 只下命中分片 → fontTools 合并 → 按字符集 subset → 输出**一个** woff2 到 `src/assets/cjk/{id}.woff2`，并生成同名 `.css`（一行 `@font-face`），由 `src/style.css` 里 `@import` 进来、esbuild 的 `.woff2 → dataurl` 内联进产物。
 
@@ -182,7 +185,8 @@ src/main.ts                   挂载、事件、重建调度、播放、导出�
 src/config.ts                 参数类型、默认值、stageSize()、hash 编解码
 src/style.css                 深浅两套纸面 + 舞台、控件、遮罩
 src/signature/skeleton.ts     栅格化 → 细化 → 距离场 → 追踪 → 合段 → 笔顺 → 登场时间归属；中文走 buildHanziGlyph(ch, fontKey)
-src/signature/cjkfont.ts      中文字体表（kai / brush / cursive）与 ensureCjkFont() 就绪检测
+src/signature/cjkfont.ts      中文字体表（kai / brush / cursive）、ensureCjkFont() 就绪检测、cjkCover() 覆盖判断
+src/signature/cjkCover.ts     两款字体的 cmap 覆盖字表（生成物，勿手改）
 src/signature/hanzi.ts        中文笔画表解码（轮廓 Path2D + 中线点列）与缓存
 src/signature/layout.ts       排布、时间分配、登场时间图投影、装饰锚点
 src/signature/render.ts       draw(ctx, t, {quality})：墨迹 / 辉光 / 笔尖 / 装饰 / 星屑
@@ -198,7 +202,8 @@ src/data/ARPHICPL.txt         中文字形数据的 Arphic Public License 原文
 scripts/build.mjs             esbuild 构建（默认多文件，--single 出单文件）
 scripts/dev.mjs               esbuild watch + 本地服务（端口 5173）
 scripts/build-hanzi.mjs       GB2312 一级字表 → 压缩编码 → 写 src/data/hanzi.ts
-scripts/build-cjk.py          fontsource 分片 → 合并 → 按 3755 字 subset → src/assets/cjk/*.woff2
+scripts/build-cjk.py          fontsource 分片 → 合并 → 按字表 subset → src/assets/cjk/*.woff2
+scripts/cover-cjk.py          从字体 cmap 导出覆盖字表 → src/signature/cjkCover.ts
 ```
 
 数据流：`面板/链接 → Config → buildArt()（字形 + 排布 + 时间 + 登场时间图）→ Scene.draw(t) → 预览 rAF 循环 / 导出离线帧循环 → VideoEncoder → mp4-muxer → Blob → 下载`。预览和导出共用同一个 `draw(t)`，但各有各的时钟：预览读真实时间，导出用 `t = i / total`。
@@ -207,7 +212,7 @@ scripts/build-cjk.py          fontsource 分片 → 合并 → 按 3755 字 subs
 
 ## 已知限制
 
-- **汉字覆盖 GB2312 一级字表 3755 字，不是全集**。二级字表（约 3008 字，含大量生僻字）、日文假名、emoji 都不支持 —— 缺字会在面板上给出"这些字符没有字形：…"的提示，并且**不会被系统字体顶替**（顶替会画成印刷体，混在手写里更假）。想扩到 GB2312 全集 / GB18030，改 `scripts/build-hanzi.mjs` 里的 `gb2312Level1()` 再跑一次生成脚本即可，代价是单文件体积按比例变大（3755 字 ≈ 4.7MB，全集约 8–10MB）。
+- **汉字覆盖 GB2312 全部 6763 字（一级 3755 + 二级 3008）**。GBK 扩展区生僻字（如「玥」「旻」「喆」）、日文假名、emoji 都不支持 —— 缺字会在面板上给出"这些字符没有字形：…"的提示，并且**不会被系统字体顶替**（顶替会画成印刷体，混在手写里更假）。想扩到 GB18030，改 `scripts/build-hanzi.mjs` 里的 `gb2312All()` 再跑一次生成脚本即可，代价是单文件体积按比例变大（6763 字 ≈ 9.1MB，GBK 全集约 20MB+）。
 - **中文字形默认是楷书轮廓**。`kai` 来自 Arphic 楷书（Make Me a Hanzi），本身比 Caveat 的连笔手写更"工整"；想要"真实手写"就切 `brush`（马善政毛笔楷书）或 `cursive`（志莽行书）—— 这两款是**真字体字形**，只换肉不换笔顺。它们仍是楷书/行书骨架，不是狂草。
 - **中文字体只收了两款**。第三款龙藏（LongCang）能再 +2.5MB 但观感与行书接近，为控制体积没做进来（加回来的步骤见上文）。
 - **字体子集只覆盖 3755 字**。字体文件是按本站支持的字裁的，输字超出这个表就走缺字提示（不会画出字体里没有的字，也不会退回印刷体）。
@@ -217,7 +222,7 @@ scripts/build-cjk.py          fontsource 分片 → 合并 → 按 3755 字 subs
 - **画布上限**：单边 ≤ 4096、面积 ≤ 16777216 像素。产品只提供到 1920×1080（面积 2.07M），远低于上限；`stageSize()` 里有面积断言，不会再往上加分辨率，所以不存在"8K 白屏"这条路径。
 - **首字生成有延迟**：拉丁字符第一次出现时要跑完整条骨架管线（约几十毫秒/字）；中文首次用到某字要把 4.7MB 表拆开解码（每字几百微秒，但在同一帧里连续解四个字会有一次可见的停顿）。之后都走内存缓存。
 - **导出耗时**：1920×1080 / 150 帧在本机 Chromium 实测拉丁 5.4–5.6s、中文 7.0s（首轮冷启 10.2s，含首字构形）；低配机器会更慢，导出期间有进度条与取消。
-- **体积**：单文件产物 11.7MB，其中 4.68MB 汉字笔画数据、4.0MB 是两款中文字体的 base64（2.95MB + 2.06MB woff2）。接受这个体积是为了"常见姓名都能直接写 + 两档真手写字体"；嫌大可以只留一款字体（删掉 `src/assets/cjk/cursive.*` 与 `style.css` 里对应 `@import`），或按上面的办法砍字表覆盖范围。
+- **体积**：单文件产物 16.7MB，其中 9.1MB 汉字笔画数据、6.8MB 是两款中文字体的 base64（2.95MB + 2.06MB woff2）。接受这个体积是为了"GB2312 全部汉字都能直接写 + 两档真手写字体"；嫌大可以只留一款字体（删掉 `src/assets/cjk/cursive.*` 与 `style.css` 里对应 `@import`，省 2.06MB），或把字表退回一级 3755 字（改 `build-hanzi.mjs` 的 `gb2312All()`）。
 - **预览分辨率**：预览画布按容器尺寸 + DPR（上限 2）绘制，和导出尺寸不同源，所以预览的细节不等于成片细节。
 
 ---
@@ -269,7 +274,16 @@ scripts/build-cjk.py          fontsource 分片 → 合并 → 按 3755 字 subs
 | 适配提示可用 | ✅ | 默认「太阳 + 收尾弹出」时 `#motionHint` = 「建议换成「绕字旋转」：太阳适合绕字公转，像给名字打光。当前「收尾弹出」也能跑，只是没那么贴。」；选成推荐动作后提示变为「适配：… —— 为什么」 |
 | 多动作不影响帧数/一致性 | ✅ | 换动作后导出仍是 150 帧（见下表），同 t 两帧字节一致 |
 
-其他实测：`npx tsc --noEmit` 通过（strict）；单文件产物 11,983,769 B（11,693.5KB js+css，含两款中文字体 base64 与 4.68MB 汉字数据）；打开无 `pageerror`；拖动字号滑块从 input 事件到下一次 rAF 落地 10.6ms（目标 ≤16ms）；`npm run build:single` 可重复构建，`.vendor/` 里的源数据不受影响。
+**二级字与字体覆盖（本轮新增项的实测）**：
+
+| 项目 | 结果 | 依据 |
+| --- | --- | --- |
+| 二级字能写 | ✅ | 用户报的「汪晶婷」：`婷`（GB2312 二级，编码 `E6C3`）现在在字表里，`art.missing = []`，三个字都按笔顺写出（内置楷书） |
+| 手写字体缺字有明确提示 | ✅ | 同一名字切到 `brush` / `cursive`：`art.fontFallback = ['婷']`，三个字统一退回内置楷书（不会一半印刷体一半手写），面板提示「所选手写字体只裁了常用字，「婷」在里面没有字形，整个名字已改用内置楷书……」 |
+| 不再被系统字体偷偷顶替 | ✅ | 加覆盖清单前，缺字由浏览器静默换系统字体顶上（`fontFamily` 仍显示 `MSZ Brush`，肉眼是印刷体）；改为 `cjkCover()` 预检后走显式回退，`glyph.fontFamily` 回落为空（内置矢量） |
+| 字表完整 | ✅ | `gb2312All()` 解码 6768 个码位，其中 5 个不是汉字，实际 6763 字全部有笔画数据（缺 0），数据 9.10MB、1411 B/字 |
+
+其他实测：`npx tsc --noEmit` 通过（strict）；单文件产物 16,675,040 B（16,274.8KB js+css，含两款中文字体 base64 与 9.1MB 汉字数据）；打开无 `pageerror`；首屏字形落地 450–670ms（16.7MB 单文件，比 12MB 版慢 0.2s 左右）；拖动字号滑块从 input 事件到下一次 rAF 落地 10.6ms（目标 ≤16ms）；`npm run build:single` 可重复构建，`.vendor/` 里的源数据不受影响。
 
 **本轮导出实测**：`示例导出-康誉-1920x1080.mp4`（毛笔字体 + 绕字旋转 + 五效果全开）：150 帧 / 5.0s / avc1 / 1,146,431 B，导出耗时 10.6s（含首次构形）。
 

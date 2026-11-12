@@ -44,6 +44,8 @@ export interface Art {
   strokes: PlacedStroke[];
   deco: DecoPlacement | null;
   missing: string[];
+  /** 所选手写字体里没有、已整名退回内置楷书的字（用来提示，不算缺字） */
+  fontFallback: string[];
   /** 参数指纹，用于底图缓存 */
   key: string;
   /** 名字区域的包围盒，粒子从这儿冒出来 */
@@ -77,6 +79,8 @@ export function buildArt(cfg: Config): Art {
   if (cfg.nameB.trim()) blocks.push({ text: cfg.nameB, color: cfg.colorB, scale: cfg.scaleB });
 
   const missing: string[] = [];
+  /** 所选手写字体里没有、已统一退回内置楷书的字 */
+  const fontFallback: string[] = [];
   const placed: Array<{ glyph: Glyph; size: number; block: number; color: string }[]> = [];
 
   // 基准字号：以画布短边为参照，保证换比例时观感一致
@@ -89,12 +93,26 @@ export function buildArt(cfg: Config): Art {
   for (let bi = 0; bi < blocks.length; bi++) {
     const b = blocks[bi];
     const chars = [...b.text];
-    const glyphs: Glyph[] = [];
+    let glyphs: Glyph[] = [];
     for (const ch of chars) {
       if (ch === ' ') continue;
       const g = getGlyph(ch, cfg.cjkFont);
       if (g) glyphs.push(g);
       else missing.push(ch);
+    }
+    // 手写字体只裁了常用字：只要有一个字字体里没有，整个名字统一改用内置楷书，
+    // 免得一半毛笔一半楷书；同时把这些字记下来交给面板提示。
+    if (cfg.cjkFont !== 'kai' && glyphs.some((g) => g.fellBack)) {
+      for (const ch of chars) {
+        if (ch === ' ') continue;
+        if (getGlyph(ch, cfg.cjkFont)?.fellBack) fontFallback.push(ch);
+      }
+      glyphs = [];
+      for (const ch of chars) {
+        if (ch === ' ') continue;
+        const g = getGlyph(ch, 'kai');
+        if (g) glyphs.push(g);
+      }
     }
     if (!glyphs.length) {
       placed.push([]);
@@ -205,7 +223,7 @@ export function buildArt(cfg: Config): Art {
   const map = buildTimeMap(glyphs, strokes, mapW, mapH);
 
   return {
-    W, H, glyphs, strokes, deco, missing, key, box, map, mapW, mapH,
+    W, H, glyphs, strokes, deco, missing, fontFallback, key, box, map, mapW, mapH,
     style: cfg.style,
     cjkFont: cfg.cjkFont,
     decoMotion: cfg.decoMotion,

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 生成中文笔画数据：src/data/hanzi.ts
  *
  * 数据源：hanzi-writer-data（npm 包，衍生自 Make Me a Hanzi / Arphic 字体，Arphic Public License）
@@ -34,11 +34,11 @@ if (!fs.existsSync(srcDir)) {
   process.exit(1);
 }
 
-/** GB2312 一级字（0xB0A1–0xD7F9），解码得到 3755 个常用汉字 */
-function gb2312Level1() {
+/** GB2312 全部汉字（一级 0xB0A1–0xD7F9 + 二级 0xD8A1–0xF7FE），解码得到 6763 个汉字 */
+function gb2312All() {
   const dec = new TextDecoder('gbk');
   const out = [];
-  for (let hi = 0xb0; hi <= 0xd7; hi++) {
+  for (let hi = 0xb0; hi <= 0xf7; hi++) {
     for (let lo = 0xa1; lo <= 0xfe; lo++) {
       const c = dec.decode(new Uint8Array([hi, lo]));
       if (c.length !== 1 || c.charCodeAt(0) === 0xfffd) continue;
@@ -82,7 +82,7 @@ function encodeMedian(points) {
   return out;
 }
 
-const chars = gb2312Level1();
+const chars = gb2312All();
 const payloads = new Map();
 let hit = 0;
 let miss = 0;
@@ -109,7 +109,7 @@ const header = `/**
  * 中文笔画数据（生成文件，勿手改）
  *   由 scripts/build-hanzi.mjs 从 hanzi-writer-data 生成。
  *   来源：Make Me a Hanzi / Arphic 字体，Arphic Public License（见 src/data/ARPHICPL.txt）。
- *   覆盖：GB2312 一级字表 ${kept.length} 字；坐标为 1024 见方、y 向下、基线 y=900。
+ *   覆盖：GB2312 全部汉字 ${kept.length} 字（一级 3755 + 二级 3008）；坐标为 1024 见方、y 向下、基线 y=900。
  */
 `;
 const body = `export const HANZI_CHARS = ${JSON.stringify(list)};\n\nexport const HANZI_DATA = ${JSON.stringify(
