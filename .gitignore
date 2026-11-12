@@ -1,0 +1,18 @@
+# 依赖
+node_modules/
+
+# 多文件构建产物（可由 npm run build 重新生成）
+dist/
+
+# esbuild / 调试用的临时目录
+.build/
+.tmp/
+
+# 日志
+*.log
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 说明：dist-single/签名生成器.html 与示例导出 MP4 是交付产物，故意纳入版本管理。

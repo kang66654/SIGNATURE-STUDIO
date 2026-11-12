@@ -1,0 +1,20 @@
+{
+  "name": "signature-studio",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "node scripts/build.mjs",
+    "build:single": "node scripts/build.mjs --single",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "mp4-muxer": "^5.1.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.4",
+    "esbuild": "^0.21.5",
+    "typescript": "^5.6.3"
+  }
+}
