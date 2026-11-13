@@ -1,8 +1,34 @@
-# 动态签名站 · 动态手写签名生成器
+# SIGNATURE STUDIO · 动态手写签名生成器
 
-输入名字（拉丁或中文姓名，如 张伟 / 李娜），实时看笔尖按笔画顺序把名字写出来，然后一键导出真 MP4。纯前端，无后端，不用 React/Vue/Tailwind/WebGL。
+输入名字（拉丁字母或中文姓名，如 张伟 / 李娜 / 康誉），笔尖就按**真实笔顺**一笔一笔把名字写出来，写完收尾弹出装饰，然后一键导出**真 MP4**。纯前端，无后端，不用 React / Vue / Tailwind / WebGL。
+
+![毛笔字体 + 绕字旋转 + 五种效果全开](docs/hero-brush.png)
+
+<p align="center">
+  <img src="docs/hero-cursive.png" width="49%" alt="行书字体 + 自旋装饰" />
+  <img src="docs/panel.png" width="49%" alt="参数面板" />
+</p>
 
 ---
+
+## 它是什么
+
+一个单文件的"签名动画生成器"：左边是深色舞台里的实时预览，右边是 14 个参数（名字、颜色、字号、装饰、装饰动作、中文字体、笔迹风格、动态效果、时长、画幅）。所有参数都写进 URL hash，链接即配置；导出走 WebCodecs 离线帧循环，帧数严格等于 `时长 × 30`，同一组参数重导出的画面逐帧一致。
+
+产物 `dist-single/签名生成器.html` 约 16.7MB（汉字笔画数据 9.1MB + 两档手写字体 6.8MB base64），拷到任何地方双击就能用，不联网也跑。
+
+## 特性
+
+| | |
+| --- | --- |
+| **按笔顺书写** | 汉字用 Make Me a Hanzi 的真实笔顺数据（6763 字），拉丁字母用骨架化 + 就近接笔推导；遮罩沿骨架推进，笔与笔之间留抬笔空窗 |
+| **中文字体三档** | 内置楷书（矢量轮廓）/ 毛笔楷书·马善政 / 行书·志莽 —— 换字体只换"肉"，笔顺不变；字体缺字时整名退回楷书并说明 |
+| **四档笔迹风格** | 细笔 / 毛笔出锋 / 连笔签名（带飞白弧、字距收紧）/ 圆润粗笔，做法是几何加工，不换字体、切换即时 |
+| **15 种装饰 × 8 档动作** | 太阳/月亮/星星/爱心/猫耳/小狗/云朵… 各自可绕字公转、落下弹跳、自旋入场、钟摆摇晃、呼吸缩放；面板会告诉你哪种装饰配哪个动作 |
+| **5 个动态效果** | 笔尖拖尾、墨点飞溅、呼吸辉光、写完涟漪、落款印章，全部只依赖 `t`，可多选叠加 |
+| **真 MP4 导出** | WebCodecs `avc1` + `mp4-muxer`，每秒一个关键帧、编码背压、可取消；Safari 自动降级 WebM 草稿 |
+| **性能** | 拖动滑块低质量档 ≤16ms 出图，松手 120ms 后全质量重建；辉光按参数指纹缓存，不每帧重算 `shadowBlur` |
+| **可访问** | 热区 ≥44px、键盘可达、`prefers-reduced-motion` 直接渲染末帧、375px 起不破版 |
 
 ## 快速开始
 
@@ -17,6 +43,22 @@ npm run typecheck    # npx tsc --noEmit
 `dist-single/签名生成器.html` 是自包含的一个文件：拷到任何地方双击就能用，不联网也跑。
 
 **环境要求**：Node ≥ 18（本机实测 v22.23.2）。导出 MP4 需要支持 WebCodecs 的浏览器（Chrome / Edge 116+）。Safari 走 WebM 回退。
+
+## 目录
+
+- [为什么是 esbuild 而不是 Vite](#为什么是-esbuild-而不是-vite)
+- [关于字形数据（两种字各有各的路）](#关于字形数据两种字各有各的路)
+- [中文姓名是怎么写出来的](#中文姓名是怎么写出来的)
+- [中文字体（两种手写真字体 + 内置楷书）](#中文字体两种手写真字体--内置楷书)
+- [字形是怎么变成"能按笔顺写"的](#字形是怎么变成能按笔顺写的)
+- [参数（14 个）](#参数14-个)
+- [笔迹风格与动态效果（怎么实现"更像手写"）](#笔迹风格与动态效果怎么实现更像手写)
+- [项目结构](#项目结构)
+- [第三方资源与许可](#第三方资源与许可)
+- [已知限制](#已知限制)
+- [验收清单（逐条实测）](#验收清单逐条实测)
+
+---
 
 ### 为什么是 esbuild 而不是 Vite
 
@@ -60,6 +102,8 @@ node_modules\@rollup\rollup-win32-x64-msvc\rollup.win32-x64-msvc.node  →  ERR_
 
 **字表覆盖与字体覆盖不是一回事**：笔画数据（也就是"能不能写这个字"）覆盖 GB2312 全部 6763 字；两款手写字体为了控体积只裁了一级字表 3755 字。「婷」这类二级字在毛笔/行书里没有字形时，`cjkCover()`（`src/signature/cjkCover.ts`，由 `scripts/cover-cjk.py` 从字体 cmap 导出）会先拦下来 —— **整个名字统一退回内置楷书**，面板同时说明「所选手写字体只裁了常用字，「婷」在里面没有字形……」。
 为什么不能只查"画出来有没有墨"：字体缺字时浏览器会**静默**换系统字体顶上，画出来是一行印刷体和手写混在一起，比直接退回楷书更难看。所以必须有明确的 cmap 清单。
+
+![三档中文字体对比：内置楷书 / 马善政毛笔 / 志莽行书](docs/fonts.png)
 
 **为什么不整份塞字体**：两款字体的全量 TTF 各 5–10MB，直接内联会把单文件推到 30MB。`scripts/build-cjk.py` 走的是"按本站支持的字裁剪"：读 `src/data/hanzi.ts` 的 `HANZI_CHARS`（3755 字）→ 拉 fontsource 的 `index.css` 解析每个分片的 `unicode-range` → 只下命中分片 → fontTools 合并 → 按字符集 subset → 输出**一个** woff2 到 `src/assets/cjk/{id}.woff2`，并生成同名 `.css`（一行 `@font-face`），由 `src/style.css` 里 `@import` 进来、esbuild 的 `.woff2 → dataurl` 内联进产物。
 
@@ -161,6 +205,8 @@ npm run build:single
 | 猫耳 / 小狗 | `pop` | 贴在字头弹出后就停住，乱飞会怪 |
 | 任意 | `follow` | 想强调"边写边有东西跟着笔走"时用它 |
 
+![八档装饰动作 × 四个时刻](docs/motions.png)
+
 五个效果层同样只依赖 `t`（无随机数、无历史状态、无时间戳），所以**同一 t 必出同一帧**，导出可复现：
 
 | 效果 | 何时 | 画法 |
@@ -197,16 +243,30 @@ src/ui/panel.ts               五组原生控件双向绑定、缺字提示
 src/ui/toast.ts               单例提示
 src/assets/*.woff2            Caveat 400 / 700（OFL，本地内联）
 src/assets/cjk/               中文手写体子集：brush.woff2 + brush.css、cursive.woff2 + cursive.css（OFL）
-src/data/hanzi.ts             3755 个汉字笔画数据（生成物，勿手改）
+src/data/hanzi.ts             GB2312 全部 6763 字笔画数据（生成物，勿手改）
 src/data/ARPHICPL.txt         中文字形数据的 Arphic Public License 原文
 scripts/build.mjs             esbuild 构建（默认多文件，--single 出单文件）
 scripts/dev.mjs               esbuild watch + 本地服务（端口 5173）
-scripts/build-hanzi.mjs       GB2312 一级字表 → 压缩编码 → 写 src/data/hanzi.ts
+scripts/build-hanzi.mjs       GB2312 全部汉字 → 压缩编码 → 写 src/data/hanzi.ts
 scripts/build-cjk.py          fontsource 分片 → 合并 → 按字表 subset → src/assets/cjk/*.woff2
 scripts/cover-cjk.py          从字体 cmap 导出覆盖字表 → src/signature/cjkCover.ts
 ```
 
 数据流：`面板/链接 → Config → buildArt()（字形 + 排布 + 时间 + 登场时间图）→ Scene.draw(t) → 预览 rAF 循环 / 导出离线帧循环 → VideoEncoder → mp4-muxer → Blob → 下载`。预览和导出共用同一个 `draw(t)`，但各有各的时钟：预览读真实时间，导出用 `t = i / total`。
+
+---
+
+## 第三方资源与许可
+
+| 资源 | 用途 | 许可 |
+| --- | --- | --- |
+| [hanzi-writer-data](https://github.com/chanind/hanzi-writer-data)（Make Me a Hanzi / Arphic 楷书） | 6763 个汉字的笔画轮廓与中线（也就是笔顺） | Arphic Public License，原文见 `src/data/ARPHICPL.txt` |
+| [Ma Shan Zheng](https://fontsource.org/fonts/ma-shan-zheng)（@fontsource 5.3.1） | 「毛笔楷书」字体的字形 | SIL Open Font License 1.1 |
+| [Zhi Mang Xing](https://fontsource.org/fonts/zhi-mang-xing)（@fontsource 5.3.0） | 「行书」字体的字形 | SIL Open Font License 1.1 |
+| [Caveat](https://fontsource.org/fonts/caveat) | 拉丁字母的手写体字形 | SIL Open Font License 1.1 |
+| [mp4-muxer](https://github.com/Vanilagy/mp4-muxer) | WebCodecs 编码后的 MP4 封装 | MIT |
+
+字体均按本站字符集做了子集化（`scripts/build-cjk.py`），未整份分发；需要原始字体请从上面的上游下载。项目自身代码目前未附开源许可，如需转载/二次分发请先联系作者。
 
 ---
 
@@ -220,7 +280,7 @@ scripts/cover-cjk.py          从字体 cmap 导出覆盖字表 → src/signatur
 - **笔顺**：中文用笔画数据里的真实笔顺（每个字的第几笔、走向都是现成的）；拉丁字母没有笔顺标准，靠起点 + 就近接笔推导，观感接近手写但不等同书法笔顺。
 - **Safari 只能导出 WebM**（`MediaRecorder` 不支持 MP4 muxing）。界面会明确标"草稿格式"，并给出"正式导出请用 Chrome"的建议。WebM 是实时录制，掉帧风险比 MP4 高。
 - **画布上限**：单边 ≤ 4096、面积 ≤ 16777216 像素。产品只提供到 1920×1080（面积 2.07M），远低于上限；`stageSize()` 里有面积断言，不会再往上加分辨率，所以不存在"8K 白屏"这条路径。
-- **首字生成有延迟**：拉丁字符第一次出现时要跑完整条骨架管线（约几十毫秒/字）；中文首次用到某字要把 4.7MB 表拆开解码（每字几百微秒，但在同一帧里连续解四个字会有一次可见的停顿）。之后都走内存缓存。
+- **首字生成有延迟**：拉丁字符第一次出现时要跑完整条骨架管线（约几十毫秒/字）；中文首次用到某字要把 9.1MB 表拆开解码（每字几百微秒，但在同一帧里连续解四个字会有一次可见的停顿）。之后都走内存缓存。
 - **导出耗时**：1920×1080 / 150 帧在本机 Chromium 实测拉丁 5.4–5.6s、中文 7.0s（首轮冷启 10.2s，含首字构形）；低配机器会更慢，导出期间有进度条与取消。
 - **体积**：单文件产物 16.7MB，其中 9.1MB 汉字笔画数据、6.8MB 是两款中文字体的 base64（2.95MB + 2.06MB woff2）。接受这个体积是为了"GB2312 全部汉字都能直接写 + 两档真手写字体"；嫌大可以只留一款字体（删掉 `src/assets/cjk/cursive.*` 与 `style.css` 里对应 `@import`，省 2.06MB），或把字表退回一级 3755 字（改 `build-hanzi.mjs` 的 `gb2312All()`）。
 - **预览分辨率**：预览画布按容器尺寸 + DPR（上限 2）绘制，和导出尺寸不同源，所以预览的细节不等于成片细节。
@@ -251,7 +311,7 @@ scripts/cover-cjk.py          从字体 cmap 导出覆盖字表 → src/signatur
 | 单字自动放大 | ✅ | 只填「张」→ `size 551`（1080 宽画布，原来只有 324），名字撑住版面；装饰太阳落在字顶上方 `y=284`（字顶 336），留出缺口不压字头 |
 | 中文导出可播放 | ✅ | `signature-张伟-李娜-1920x1080.mp4`：150 帧 / 5.0s / avc1 / 1920×1080 / 986,778 B；Chromium 载入 `readyState 4`、`error null`，seek 4.95s 仍有 74,922 个亮像素 |
 | 中英混排 | ✅ | 同页分别渲染拉丁与中文，无 `pageerror`；两段各自按字号倍率排布、基线对齐 |
-| 中文缺字边界 | ✅ | 3755 字表以外的字（龘 / あ / 😀）走缺字提示，不误判成"有字"，也不拿系统字体顶替 |
+| 中文缺字边界 | ✅ | GB2312 之外的码位（龘 / 玥 / あ / 😀）走缺字提示，不误判成"有字"，也不拿系统字体顶替 |
 
 **中文字体（本轮新增项的实测）**：
 
