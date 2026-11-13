@@ -15,7 +15,7 @@
 
 一个单文件的"签名动画生成器"：左边是深色舞台里的实时预览，右边是 14 个参数（名字、颜色、字号、装饰、装饰动作、中文字体、笔迹风格、动态效果、时长、画幅）。所有参数都写进 URL hash，链接即配置；导出走 WebCodecs 离线帧循环，帧数严格等于 `时长 × 30`，同一组参数重导出的画面逐帧一致。
 
-产物 `dist-single/签名生成器.html` 约 16.7MB（汉字笔画数据 9.1MB + 两档手写字体 6.8MB base64），拷到任何地方双击就能用，不联网也跑。
+产物 `dist-single/签名生成器.html` 约 21.7MB（汉字笔画数据 9.1MB + 两档手写字体 9.4MB base64），拷到任何地方双击就能用，不联网也跑。
 
 ## 特性
 
@@ -94,18 +94,18 @@ node_modules\@rollup\rollup-win32-x64-msvc\rollup.win32-x64-msvc.node  →  ERR_
 
 ### 中文字体（两种手写真字体 + 内置楷书）
 
-| 选项 | 字体族 | 来源 | 授权 | 体积（3755 字子集） |
+| 选项 | 字体族 | 来源 | 授权 | 体积（6763 字子集） |
 | --- | --- | --- | --- | --- |
 | `kai` 楷书 · 内置笔画 | 无（矢量轮廓 + 笔顺数据） | hanzi-writer-data / Arphic | Arphic Public License | 0（数据已含，6763 字全覆盖） |
-| `brush` 毛笔楷书 · 马善政 | `MSZ Brush` = Ma Shan Zheng | [@fontsource/ma-shan-zheng](https://fontsource.org/fonts/ma-shan-zheng) 5.3.1 | OFL-1.1 | 2.95MB（一级 3755 字） |
-| `cursive` 行书 · 志莽 | `ZMX Cursive` = Zhi Mang Xing | [@fontsource/zhi-mang-xing](https://fontsource.org/fonts/zhi-mang-xing) 5.3.0 | OFL-1.1 | 2.06MB（一级 3755 字） |
+| `brush` 毛笔楷书 · 马善政 | `MSZ Brush` = Ma Shan Zheng | [google/fonts · MaShanZheng](https://github.com/google/fonts/tree/main/ofl/mashanzheng) | OFL-1.1 | 5.6MB（6763 字） |
+| `cursive` 行书 · 志莽 | `ZMX Cursive` = Zhi Mang Xing | [google/fonts · ZhiMangXing](https://github.com/google/fonts/tree/main/ofl/zhimangxing) | OFL-1.1 | 3.8MB（6763 字） |
 
-**字表覆盖与字体覆盖不是一回事**：笔画数据（也就是"能不能写这个字"）覆盖 GB2312 全部 6763 字；两款手写字体为了控体积只裁了一级字表 3755 字。「婷」这类二级字在毛笔/行书里没有字形时，`cjkCover()`（`src/signature/cjkCover.ts`，由 `scripts/cover-cjk.py` 从字体 cmap 导出）会先拦下来 —— **整个名字统一退回内置楷书**，面板同时说明「所选手写字体只裁了常用字，「婷」在里面没有字形……」。
+**笔画数据和字体都覆盖 GB2312 全部 6763 字**：早期字体只裁了一级字表 3755 字，「婷」这类二级字在手写字体里没有字形，只能整名退回楷书。现在 `scripts/build-cjk.py` 直接从上游拉全量 TTF 裁到 6763 字，`cjkCover()`（`src/signature/cjkCover.ts`，由 `scripts/cover-cjk.py` 从字体 cmap 导出）里两款字体也都是 6763 字，三档字体对 GB2312 全表一视同仁。回退逻辑没有删：它仍是兜底（字表以外的码位、或将来换更小的子集时，宁可整名退回楷书，也不要一半手写一半印刷体）。
 为什么不能只查"画出来有没有墨"：字体缺字时浏览器会**静默**换系统字体顶上，画出来是一行印刷体和手写混在一起，比直接退回楷书更难看。所以必须有明确的 cmap 清单。
 
 ![三档中文字体对比：内置楷书 / 马善政毛笔 / 志莽行书](docs/fonts.png)
 
-**为什么不整份塞字体**：两款字体的全量 TTF 各 5–10MB，直接内联会把单文件推到 30MB。`scripts/build-cjk.py` 走的是"按本站支持的字裁剪"：读 `src/data/hanzi.ts` 的 `HANZI_CHARS`（3755 字）→ 拉 fontsource 的 `index.css` 解析每个分片的 `unicode-range` → 只下命中分片 → fontTools 合并 → 按字符集 subset → 输出**一个** woff2 到 `src/assets/cjk/{id}.woff2`，并生成同名 `.css`（一行 `@font-face`），由 `src/style.css` 里 `@import` 进来、esbuild 的 `.woff2 → dataurl` 内联进产物。
+**怎么裁**：`scripts/build-cjk.py` 从 jsDelivr 取 google/fonts 里的全量 TTF（缓存到 `.vendor/cjk/`，实测 400–700KB/s）→ 读 `src/data/hanzi.ts` 的 `HANZI_CHARS`（6763 字）→ fontTools subset（丢掉 hinting 指令、只留 family/style 名字表）→ 输出**一个** woff2 到 `src/assets/cjk/{id}.woff2`，并生成同名 `.css`（一行 `@font-face`），由 `src/style.css` 里 `@import` 进来、esbuild 的 `.woff2 → dataurl` 内联进产物。早先走的是 fontsource 分片合并，分片下载只有 2–3KB/s，才只能裁 3755 字。
 
 ```bash
 python scripts/build-cjk.py          # 重新生成 / 更新字体子集（需要 fontTools + brotli）
@@ -113,7 +113,7 @@ python scripts/build-cjk.py brush    # 只重建其中一款
 npm run build:single
 ```
 
-体积与收益的取舍：马善政（毛笔）2.95MB、志莽（行书）2.06MB，两款加起来把单文件从 5.0MB 推到 11.7MB。第三款（龙藏 LongCang）实测再 +2.5MB、观感与行书接近，为了不让文件继续膨胀**没有收进来**；想加回来把 `scripts/build-cjk.py` 的 `FONTS` 里那行取消注释、重新跑，再补 `src/signature/cjkfont.ts`、`src/config.ts` 的 `CJKFontKey`、`index.html` 的 `<option>` 与 `src/style.css` 的 `@import` 四处即可。
+体积与收益的取舍：马善政（毛笔）5.6MB、志莽（行书）3.8MB，两款加起来把单文件从 5.0MB 推到 21.7MB。这是"6763 字全都能手写"的必然代价 —— 6763 个手写字形本身就在 9MB 上下，跟字体文件格式关系不大。第三款（龙藏 LongCang）观感与行书接近、还要再加 4MB 左右，**没有收进来**；想加回来把 `scripts/build-cjk.py` 的 `FONTS` 里补一行、重新跑，再补 `src/signature/cjkfont.ts`、`src/config.ts` 的 `CJKFontKey`、`index.html` 的 `<option>` 与 `src/style.css` 的 `@import` 四处即可。
 
 字体晚到会被"系统字体顶替"画成印刷体，所以 `main.ts` 在 boot 和每次切字体时都先 `await ensureCjkFont(key)`（`document.fonts.load('96px "<family>"', '康誉…')`）再 `clearGlyphCache()` 重建；`Art.key` 与 glyph 缓存键都带上了字体，切字体不会命中旧缓存。
 
@@ -275,14 +275,14 @@ scripts/cover-cjk.py          从字体 cmap 导出覆盖字表 → src/signatur
 - **汉字覆盖 GB2312 全部 6763 字（一级 3755 + 二级 3008）**。GBK 扩展区生僻字（如「玥」「旻」「喆」）、日文假名、emoji 都不支持 —— 缺字会在面板上给出"这些字符没有字形：…"的提示，并且**不会被系统字体顶替**（顶替会画成印刷体，混在手写里更假）。想扩到 GB18030，改 `scripts/build-hanzi.mjs` 里的 `gb2312All()` 再跑一次生成脚本即可，代价是单文件体积按比例变大（6763 字 ≈ 9.1MB，GBK 全集约 20MB+）。
 - **中文字形默认是楷书轮廓**。`kai` 来自 Arphic 楷书（Make Me a Hanzi），本身比 Caveat 的连笔手写更"工整"；想要"真实手写"就切 `brush`（马善政毛笔楷书）或 `cursive`（志莽行书）—— 这两款是**真字体字形**，只换肉不换笔顺。它们仍是楷书/行书骨架，不是狂草。
 - **中文字体只收了两款**。第三款龙藏（LongCang）能再 +2.5MB 但观感与行书接近，为控制体积没做进来（加回来的步骤见上文）。
-- **字体子集只覆盖 3755 字**。字体文件是按本站支持的字裁的，输字超出这个表就走缺字提示（不会画出字体里没有的字，也不会退回印刷体）。
+- **手写字体覆盖 GB2312 全部 6763 字**。两款字体都按同一份字表裁，所以二级字（「婷」「毓」）在毛笔/行书里同样有字形；字表以外的码位本来就没有笔画数据，走缺字提示。
 - **连笔签名是"接笔"不是"草书"**。`signature` 只在相邻两笔间距 ≤18/1024 em 时补一条短飞白弧，不会重排笔顺、不会并笔，密集字（如「麓」「鬱」）连笔很少。
 - **笔顺**：中文用笔画数据里的真实笔顺（每个字的第几笔、走向都是现成的）；拉丁字母没有笔顺标准，靠起点 + 就近接笔推导，观感接近手写但不等同书法笔顺。
 - **Safari 只能导出 WebM**（`MediaRecorder` 不支持 MP4 muxing）。界面会明确标"草稿格式"，并给出"正式导出请用 Chrome"的建议。WebM 是实时录制，掉帧风险比 MP4 高。
 - **画布上限**：单边 ≤ 4096、面积 ≤ 16777216 像素。产品只提供到 1920×1080（面积 2.07M），远低于上限；`stageSize()` 里有面积断言，不会再往上加分辨率，所以不存在"8K 白屏"这条路径。
 - **首字生成有延迟**：拉丁字符第一次出现时要跑完整条骨架管线（约几十毫秒/字）；中文首次用到某字要把 9.1MB 表拆开解码（每字几百微秒，但在同一帧里连续解四个字会有一次可见的停顿）。之后都走内存缓存。
 - **导出耗时**：1920×1080 / 150 帧在本机 Chromium 实测拉丁 5.4–5.6s、中文 7.0s（首轮冷启 10.2s，含首字构形）；低配机器会更慢，导出期间有进度条与取消。
-- **体积**：单文件产物 16.7MB，其中 9.1MB 汉字笔画数据、6.8MB 是两款中文字体的 base64（2.95MB + 2.06MB woff2）。接受这个体积是为了"GB2312 全部汉字都能直接写 + 两档真手写字体"；嫌大可以只留一款字体（删掉 `src/assets/cjk/cursive.*` 与 `style.css` 里对应 `@import`，省 2.06MB），或把字表退回一级 3755 字（改 `build-hanzi.mjs` 的 `gb2312All()`）。
+- **体积**：单文件产物 21.7MB，其中 9.1MB 汉字笔画数据、9.4MB 是两款中文字体的 woff2（5.6MB + 3.8MB，base64 后约 12.6MB）。接受这个体积是为了"GB2312 全部汉字都能直接写、且三档字体都能写"；嫌大可以只留一款字体（删掉 `src/assets/cjk/cursive.*` 与 `style.css` 里对应 `@import`，省 3.8MB），或把字表退回一级 3755 字（同时改 `build-hanzi.mjs` 与 `build-cjk.py` 的字表来源）。
 - **预览分辨率**：预览画布按容器尺寸 + DPR（上限 2）绘制，和导出尺寸不同源，所以预览的细节不等于成片细节。
 
 ---
@@ -323,7 +323,7 @@ scripts/cover-cjk.py          从字体 cmap 导出覆盖字表 → src/signatur
 | 切字体耗时 | ✅ | `#cjkFont` brush → cursive 重建到画面落地 **98ms**，cursive → kai **41ms**；`__art.glyphs[].glyph.fontFamily` 正确变成 `ZMX Cursive` / 空 |
 | 字体就绪后才重建 | ✅ | `boot()` 与 `reloadCjkFont()` 都先 `await ensureCjkFont(key)` 再 `clearGlyphCache()`，`document.fonts` 里可见 `MSZ Brush:loaded` / `ZMX Cursive:loaded`，不会先画成系统字体再跳变 |
 | 换字体仍确定性 | ✅ | 同一页连续两次 `draw(ctx, 0.6, {quality:'hi'})` 的 `toDataURL()` 完全相同 |
-| 字体子集体积 | ✅ | `brush.woff2` 2,954KB / `cursive.woff2` 2,057KB（各 3755 字、84 个 fontsource 分片全命中）；`build-cjk.py` 可重复执行，产物稳定 |
+| 字体子集体积 | ✅ | `brush.woff2` 5,743,864 B / `cursive.woff2` 3,940,432 B（各 6763 字，原字体对这 6763 字缺 0 字）；`build-cjk.py` 可重复执行，产物稳定 |
 
 **装饰八档动作（本轮新增项的实测）**：
 
@@ -339,11 +339,11 @@ scripts/cover-cjk.py          从字体 cmap 导出覆盖字表 → src/signatur
 | 项目 | 结果 | 依据 |
 | --- | --- | --- |
 | 二级字能写 | ✅ | 用户报的「汪晶婷」：`婷`（GB2312 二级，编码 `E6C3`）现在在字表里，`art.missing = []`，三个字都按笔顺写出（内置楷书） |
-| 手写字体缺字有明确提示 | ✅ | 同一名字切到 `brush` / `cursive`：`art.fontFallback = ['婷']`，三个字统一退回内置楷书（不会一半印刷体一半手写），面板提示「所选手写字体只裁了常用字，「婷」在里面没有字形，整个名字已改用内置楷书……」 |
+| 「婷」在三档字体里都有字形 | ✅ | 字体裁到 6763 字后，「汪晶婷」切 `brush` / `cursive`：`art.fontFallback = []`、`#missingNote` 为空，三个字的 `glyph.fontFamily` 分别是 `MSZ Brush` / `ZMX Cursive`，末帧截图三档笔形可辨且都写出「婷」 |
 | 不再被系统字体偷偷顶替 | ✅ | 加覆盖清单前，缺字由浏览器静默换系统字体顶上（`fontFamily` 仍显示 `MSZ Brush`，肉眼是印刷体）；改为 `cjkCover()` 预检后走显式回退，`glyph.fontFamily` 回落为空（内置矢量） |
 | 字表完整 | ✅ | `gb2312All()` 解码 6768 个码位，其中 5 个不是汉字，实际 6763 字全部有笔画数据（缺 0），数据 9.10MB、1411 B/字 |
 
-其他实测：`npx tsc --noEmit` 通过（strict）；单文件产物 16,675,040 B（16,274.8KB js+css，含两款中文字体 base64 与 9.1MB 汉字数据）；打开无 `pageerror`；首屏字形落地 450–670ms（16.7MB 单文件，比 12MB 版慢 0.2s 左右）；拖动字号滑块从 input 事件到下一次 rAF 落地 10.6ms（目标 ≤16ms）；`npm run build:single` 可重复构建，`.vendor/` 里的源数据不受影响。
+其他实测：`npx tsc --noEmit` 通过（strict）；单文件产物 22,782,236 B（含两款 6763 字中文字体 base64 与 9.1MB 汉字数据）；打开无 `pageerror`；首屏字形落地 600–780ms（21.7MB 单文件，比 16.7MB 版再慢约 0.15s）；拖动字号滑块从 input 事件到下一次 rAF 落地 10.6ms（目标 ≤16ms）；`npm run build:single` 可重复构建，`.vendor/` 里的源数据不受影响。
 
 **本轮导出实测**：毛笔字体 + 绕字旋转 + 五效果全开（名字「康誉」）：150 帧 / 5.0s / avc1 / 1,146,431 B，导出耗时 10.6s（含首次构形）。该样本体积较大，未随仓库分发；仓库里保留的是 `示例导出-张三-李四-1920x1080.mp4`。
 

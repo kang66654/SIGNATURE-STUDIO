@@ -59,7 +59,7 @@ function updateMissing() {
     );
   } else if (fallback) {
     panel.setMissing(
-      `所选手写字体只裁了常用字，「${fallback}」在里面没有字形，整个名字已改用内置楷书，避免一半毛笔一半楷书。`,
+      `所选手写字体里没有「${fallback}」的字形，整个名字已改用内置楷书，避免一半手写一半楷书。`,
     );
   } else {
     panel.setMissing(null);

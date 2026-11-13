@@ -1,12 +1,14 @@
-"""把 fontsource 的中文字体按「本站支持的字」裁出来，尺寸压到能塞进单文件。
+"""裁中文字体子集：直接拉全量 TTF，按本站支持的字（GB2312 6763 字）subset 成 woff2。
 
-步骤：拉 index.css → 只下覆盖到这 3755 个字的 woff2 分片 → fontTools 合并成一个字体 →
-按字符集 subset → 存 woff2 + 一行 @font-face。
-用法：python scripts/build-cjk.py
+之前走 fontsource 分片再合并，分片下载只有 2–3KB/s，只能裁一级字表 3755 字；
+改成从 jsDelivr 的 google/fonts 仓库直接取全量 TTF（400–700KB/s），一次裁到 6763 字。
+
+用法：python scripts/build-cjk.py [brush|cursive]
+产物：src/assets/cjk/{brush,cursive}.woff2 + 同名 .css
+缓存：.vendor/cjk/*.ttf（已进 .gitignore，可重复使用）
 """
 from __future__ import annotations
 
-import json
 import pathlib
 import re
 import sys
@@ -14,35 +16,31 @@ import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 OUT = ROOT / "src" / "assets" / "cjk"
-CDN = "https://fastly.jsdelivr.net/npm"
+CACHE = ROOT / ".vendor" / "cjk"
 UA = {"User-Agent": "Mozilla/5.0"}
+GH = "https://fastly.jsdelivr.net/gh/google/fonts@main"
 
 FONTS = [
-    {"pkg": "@fontsource/ma-shan-zheng", "id": "brush",
-     "family": "MSZ Brush", "label": "马善政毛笔楷书"},
-    {"pkg": "@fontsource/zhi-mang-xing", "id": "cursive",
-     "family": "ZMX Cursive", "label": "志莽行书"},
-    {"pkg": "@fontsource/long-cang", "id": "hand",
-     "family": "LongCang Hand", "label": "龙藏手写体"},
+    {"id": "brush", "family": "MSZ Brush", "label": "马善政毛笔楷书",
+     "url": f"{GH}/ofl/mashanzheng/MaShanZheng-Regular.ttf"},
+    {"id": "cursive", "family": "ZMX Cursive", "label": "志莽行书",
+     "url": f"{GH}/ofl/zhimangxing/ZhiMangXing-Regular.ttf"},
 ]
 
 
-def fetch(url, binary=False, tries=3):
-    last = None
-    for _ in range(tries):
-        try:
-            req = urllib.request.Request(url, headers=UA)
-            with urllib.request.urlopen(req, timeout=120) as r:
-                data = r.read()
-            return data if binary else data.decode("utf-8")
-        except Exception as e:  # noqa: BLE001
-            last = e
-    raise RuntimeError(f"{url}: {last}")
-
-
-def latest_version(pkg):
-    meta = json.loads(fetch(f"https://data.jsdelivr.com/v1/packages/npm/{pkg}"))
-    return meta["tags"]["latest"]
+def fetch_ttf(font):
+    CACHE.mkdir(parents=True, exist_ok=True)
+    dst = CACHE / f"{font['id']}.ttf"
+    if dst.exists() and dst.stat().st_size > 1_000_000:
+        print(f"  使用缓存 {dst.name} ({dst.stat().st_size / 1024:.0f}KB)", flush=True)
+        return dst
+    print(f"  下载 {font['url']}", flush=True)
+    req = urllib.request.Request(font["url"], headers=UA)
+    with urllib.request.urlopen(req, timeout=180) as r:
+        data = r.read()
+    dst.write_bytes(data)
+    print(f"  {dst.stat().st_size / 1024:.0f}KB", flush=True)
+    return dst
 
 
 def supported_chars():
@@ -53,110 +51,52 @@ def supported_chars():
     return m.group(2)
 
 
-def range_hits(urange, chars):
-    hits = 0
-    for raw in urange.split(","):
-        t = raw.strip()
-        if not t.lower().startswith("u+"):
-            continue
-        body = t[2:]
-        if "?" in body:
-            lo, hi = int(body.replace("?", "0"), 16), int(body.replace("?", "F"), 16)
-        elif "-" in body:
-            a, b = body.split("-")
-            lo, hi = int(a, 16), int(b, 16)
-        else:
-            lo = hi = int(body, 16)
-        hits += sum(1 for ch in chars if lo <= ord(ch) <= hi)
-    return hits
-
-
 def build(font, chars):
-    pkg, ver, fid = font["pkg"], font["ver"], font["id"]
-    css = fetch(f"{CDN}/{pkg}@{ver}/index.css")
-    picked = []
-    for block in css.split("@font-face")[1:]:
-        m_ur = re.search(r"unicode-range:\s*([^;]+);", block)
-        m_url = re.search(r"url\(\./files/([^)]+\.woff2)\)", block)
-        if not m_ur or not m_url:
-            continue
-        if range_hits(m_ur.group(1), chars) == 0:
-            continue
-        picked.append(m_url.group(1))
-    print(f"{fid}: 命中 {len(picked)} 个分片", flush=True)
-
-    shard_dir = OUT / "shards"
-    shard_dir.mkdir(parents=True, exist_ok=True)
-    paths = []
-    total = 0
-    for i, url in enumerate(picked):
-        dst = shard_dir / f"{fid}-{i}.woff2"
-        if not dst.exists() or dst.stat().st_size == 0:
-            data = fetch(f"{CDN}/{pkg}@{ver}/files/{url}", binary=True)
-            dst.write_bytes(data)
-        total += dst.stat().st_size
-        paths.append(dst)
-        if (i + 1) % 20 == 0:
-            print(f"  {fid} {i + 1}/{len(picked)} {total / 1024:.0f}KB", flush=True)
-
     from fontTools.ttLib import TTFont
-    from fontTools.merge import Merger
-    from fontTools.subset import Subsetter, Options
+    from fontTools.subset import Options, Subsetter
 
-    print(f"  合并 {len(paths)} 个分片…", flush=True)
-    # 分片里有的 GPOS/GSUB 是空表，直接合并会炸；这里先剥掉排版表再合成（逐字绘制用不到 kerning）
-    from fontTools.ttLib import TTFont
-    stripped = []
-    tmp = shard_dir / f"_m_{fid}"
-    tmp.mkdir(exist_ok=True)
-    for p in paths:
-        t = TTFont(p)
-        t.flavor = None
-        for tag in ("GPOS", "GSUB", "GDEF", "BASE", "JSTF", "MATH"):
-            if tag in t:
-                del t[tag]
-        dst_t = tmp / (p.stem + ".ttf")
-        t.save(dst_t)
-        stripped.append(str(dst_t))
-    merged = Merger().merge(stripped)
+    ttf = fetch_ttf(font)
+    font_obj = TTFont(ttf)
+    cmap = font_obj.getBestCmap()
+    missing = [ch for ch in chars if ord(ch) not in cmap]
+    print(f"  {font['id']}: 原字体缺 {len(missing)} 字" + (f"（{' '.join(missing[:20])}…）" if missing else ""),
+          flush=True)
 
-    text = "".join(sorted(chars))
+    text = "".join(sorted(set(chars)))
     opts = Options()
     opts.flavor = "woff2"
     opts.desubroutinize = False
     opts.layout_features = []
     opts.notdef_outline = True
-    opts.name_IDs = ["*"]
+    # Canvas 渲染不用 hinting 指令，丢掉能省 1/3 体积；名字表只留 family/style/full/ps
+    opts.name_IDs = [1, 2, 4, 6]
     opts.name_languages = ["*"]
-    opts.hinting = True
+    opts.hinting = False
+    opts.drop_tables += ["DSIG"]
     sub = Subsetter(options=opts)
     sub.populate(text=text)
-    sub.subset(merged)
+    sub.subset(font_obj)
 
-    dst = OUT / f"{fid}.woff2"
-    merged.save(dst, reorderTables=True)
+    dst = OUT / f"{font['id']}.woff2"
+    font_obj.save(dst, reorderTables=True)
     return dst.stat().st_size
 
 
 def main():
     chars = supported_chars()
-    print(f"支持汉字 {len(chars)} 个")
+    print(f"支持汉字 {len(chars)} 个", flush=True)
     OUT.mkdir(parents=True, exist_ok=True)
-    summary = []
     only = sys.argv[1] if len(sys.argv) > 1 else None
     for font in FONTS:
         if only and font["id"] != only:
             continue
-        font["ver"] = latest_version(font["pkg"])
         size = build(font, chars)
         css = (
             "@font-face{font-family:'%s';font-style:normal;font-weight:400;font-display:block;"
             "src:url('./%s.woff2') format('woff2');}" % (font["family"], font["id"])
         )
         (OUT / f"{font['id']}.css").write_text(css + "\n", encoding="utf-8")
-        summary.append({"id": font["id"], "family": font["family"], "kb": round(size / 1024)})
         print(f"{font['id']}: {size / 1024:.0f}KB", flush=True)
-    print(json.dumps(summary, ensure_ascii=False))
 
 
 if __name__ == "__main__":
